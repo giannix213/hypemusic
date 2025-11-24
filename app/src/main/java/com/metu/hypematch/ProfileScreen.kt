@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -70,6 +71,7 @@ fun ProfileScreen(
     onMenuClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val authManager = remember { AuthManager(context) }
     val firebaseManager = remember { FirebaseManager() }
     val scope = rememberCoroutineScope()
@@ -648,7 +650,11 @@ fun ProfileScreen(
             }
         )
     } else {
-        Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.background)
+        ) {
             // Header con menú
             HypeHeader(
                 onMenuClick = onMenuClick,
@@ -669,7 +675,13 @@ fun ProfileScreen(
                         .padding(top = 80.dp)
                 ) {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = {
+                                    focusManager.clearFocus()
+                                })
+                            }
                     ) {
                     // Portada con sombra
                     item {
@@ -736,7 +748,13 @@ fun ProfileScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .offset(y = (-60).dp),
+                                .offset(y = (-60).dp)
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() }
+                                ) {
+                                    focusManager.clearFocus()
+                                },
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Box {
@@ -965,6 +983,12 @@ fun ProfileScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 0.dp)
+                                    .clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() }
+                                    ) {
+                                        focusManager.clearFocus()
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1388,6 +1412,12 @@ fun ProfileScreen(
                                         color = PopArtColors.Cyan.copy(alpha = 0.3f),
                                         shape = RoundedCornerShape(16.dp)
                                     )
+                                    .clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() }
+                                    ) {
+                                        focusManager.clearFocus()
+                                    }
                                     .padding(16.dp)
                             ) {
                                 Text(

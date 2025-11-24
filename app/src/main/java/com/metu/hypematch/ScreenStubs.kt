@@ -23,9 +23,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-// PANTALLA 2: TU MÚSICA
+// PANTALLA 2: TU MÚSICA (VERSIÓN ANTIGUA - NO USAR)
 @Composable
-fun MyMusicScreen(
+fun MyMusicScreenOld(
     isDarkMode: Boolean = false,
     colors: AppColors = getAppColors(false),
     onMenuClick: () -> Unit = {}

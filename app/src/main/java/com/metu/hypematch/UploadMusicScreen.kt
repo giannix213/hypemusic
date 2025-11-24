@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +24,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -208,6 +211,7 @@ suspend fun generateCoverImageWithCustomPhoto(
 @Composable
 fun UploadMusicScreen(onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val focusManager = LocalFocusManager.current
     val firebaseManager = remember { FirebaseManager() }
     val authManager = remember { AuthManager(context) }
     val scope = rememberCoroutineScope()
@@ -348,6 +352,11 @@ fun UploadMusicScreen(onBack: () -> Unit) {
         ) { padding ->
         androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        focusManager.clearFocus()
+                    })
+                }
                 .fillMaxSize()
                 .padding(padding)
                 .padding(20.dp),
