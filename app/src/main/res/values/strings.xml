@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">HYPE</string>
+    <!-- Web Client ID de Firebase para Google Sign-In -->
+    <string name="default_web_client_id">880522213903-17312ta8c7ohscpg3dokchrlpoeigrsr.apps.googleusercontent.com</string>
+</resources>
