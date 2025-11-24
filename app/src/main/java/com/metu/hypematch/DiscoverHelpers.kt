@@ -88,7 +88,8 @@ fun ArtistCardWithPages(
     offsetY: Float,
     isPlaying: Boolean,
     onDrag: (Offset) -> Unit,
-    onDragEnd: () -> Unit
+    onDragEnd: () -> Unit,
+    onProfileClick: () -> Unit = {}
 ) {
     var currentPage by remember { mutableStateOf(0) }
     val totalPages = 4 // Principal, Galería, Info, Redes
@@ -127,7 +128,7 @@ fun ArtistCardWithPages(
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 when (currentPage) {
-                    0 -> MainPage(artist, isPlaying)
+                    0 -> MainPage(artist, isPlaying, onProfileClick)
                     1 -> GalleryPage(artist)
                     2 -> InfoPage(artist)
                     3 -> SocialPage(artist)
@@ -179,38 +180,113 @@ fun ArtistCardWithPages(
 
 @Composable
 fun MainPage(artist: ArtistCard, isPlaying: Boolean, onProfileClick: () -> Unit = {}) {
+    var swipeUpProgress by remember { mutableStateOf(0f) }
+    var showFireAnimation by remember { mutableStateOf(false) }
+    
+    // Animación del fuego
+    val fireAlpha by animateFloatAsState(
+        targetValue = if (showFireAnimation) 1f else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "fireAlpha"
+    )
+    
     Box(modifier = Modifier.fillMaxSize()) {
-        if (artist.imageUrl.isNotEmpty()) {
-            coil.compose.AsyncImage(
-                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                    .data(artist.imageUrl)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = artist.name,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.7f)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { onProfileClick() }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.7f)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDrag = { change, dragAmount ->
+                            // Detectar swipe hacia arriba
+                            if (dragAmount.y < 0) {
+                                swipeUpProgress = (swipeUpProgress - dragAmount.y / 100f).coerceIn(0f, 1f)
+                                if (swipeUpProgress > 0.3f) {
+                                    showFireAnimation = true
+                                }
+                            }
+                        },
+                        onDragEnd = {
+                            swipeUpProgress = 0f
+                            showFireAnimation = false
+                        }
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onProfileClick() }
+                    )
+                }
+        ) {
+            // Imagen del artista
+            if (artist.imageUrl.isNotEmpty()) {
+                coil.compose.AsyncImage(
+                    model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                        .data(artist.imageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = artist.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(PopArtColors.MulticolorGradient),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(artist.emoji, fontSize = 120.sp)
+                }
+            }
+            
+            // Animación de fuego en la parte inferior
+            if (fireAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    PopArtColors.Orange.copy(alpha = fireAlpha * 0.7f),
+                                    PopArtColors.Orange.copy(alpha = fireAlpha * 0.9f)
+                                )
+                            )
                         )
-                    },
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.7f)
-                    .background(PopArtColors.MulticolorGradient)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { onProfileClick() }
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(artist.emoji, fontSize = 120.sp)
+                ) {
+                    // Emojis de fuego animados
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        repeat(5) { index ->
+                            val offset by rememberInfiniteTransition(label = "fire$index").animateFloat(
+                                initialValue = 0f,
+                                targetValue = -20f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(
+                                        durationMillis = 800 + (index * 100),
+                                        easing = LinearEasing
+                                    ),
+                                    repeatMode = RepeatMode.Restart
+                                ),
+                                label = "fireOffset$index"
+                            )
+                            
+                            Text(
+                                "🔥",
+                                fontSize = 32.sp,
+                                modifier = Modifier.offset(y = offset.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
         

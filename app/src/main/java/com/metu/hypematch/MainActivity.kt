@@ -620,6 +620,10 @@ fun DiscoverScreen(
     var artists by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     
+    // Estado para ver perfil del artista
+    var showArtistProfile by remember { mutableStateOf(false) }
+    var selectedArtistId by remember { mutableStateOf<String?>(null) }
+    
     // Pausar música cuando la app pasa a segundo plano
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -802,6 +806,174 @@ fun DiscoverScreen(
             .fillMaxSize()
             .background(colors.background)
     ) {
+        // Mostrar perfil del artista si está seleccionado
+        if (showArtistProfile && selectedArtistId != null) {
+            OtherUserProfileScreen(
+                userId = selectedArtistId!!,
+                isDarkMode = isDarkMode,
+                colors = colors,
+                onBack = {
+                    showArtistProfile = false
+                    selectedArtistId = null
+                }
+            )
+        } else {
+            // Contenido normal de DiscoverScreen
+            DiscoverScreenContent(
+                colors = colors,
+                isDarkMode = isDarkMode,
+                onMenuClick = onMenuClick,
+                isLoading = isLoading,
+                artists = artists,
+                currentArtistIndex = currentArtistIndex,
+                offsetX = offsetX,
+                offsetY = offsetY,
+                isPlaying = isPlaying,
+                userId = userId,
+                player = player,
+                onDrag = { dragAmount ->
+                    offsetX += dragAmount.x
+                    offsetY += dragAmount.y
+                },
+                onDragEnd = {
+                    val artist = artists.getOrNull(currentArtistIndex)
+                    if (artist != null) {
+                        when {
+                            offsetX > 300 -> {
+                                // Swipe derecha = like
+                                favoritesManager.addFavorite(artist, "heart")
+                                if (userId.isNotEmpty()) {
+                                    scope.launch {
+                                        try {
+                                            songLikesManager.likeSong(artist.id, userId)
+                                            android.util.Log.d("DiscoverScreen", "✅ Like guardado para ${artist.name}")
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("DiscoverScreen", "❌ Error al guardar like: ${e.message}")
+                                        }
+                                    }
+                                }
+                                player.stop()
+                                currentArtistIndex++
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                            offsetX < -300 -> {
+                                // Swipe izquierda = dislike
+                                if (userId.isNotEmpty()) {
+                                    scope.launch {
+                                        try {
+                                            firebaseManager.markSongAsRejected(userId, artist.id)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("DiscoverScreen", "Error al marcar como rechazada: ${e.message}")
+                                        }
+                                    }
+                                }
+                                favoritesManager.addRejected(artist.id)
+                                player.stop()
+                                currentArtistIndex++
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                            else -> {
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                        }
+                    }
+                },
+                onDislike = {
+                    if (currentArtistIndex < artists.size) {
+                        val artist = artists[currentArtistIndex]
+                        if (userId.isNotEmpty()) {
+                            scope.launch {
+                                try {
+                                    firebaseManager.markSongAsRejected(userId, artist.id)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("DiscoverScreen", "Error al marcar como rechazada: ${e.message}")
+                                }
+                            }
+                        }
+                        favoritesManager.addRejected(artist.id)
+                        player.stop()
+                        currentArtistIndex++
+                    }
+                },
+                onLike = {
+                    if (currentArtistIndex < artists.size) {
+                        val artist = artists[currentArtistIndex]
+                        favoritesManager.addFavorite(artist, "heart")
+                        if (userId.isNotEmpty()) {
+                            scope.launch {
+                                try {
+                                    songLikesManager.likeSong(artist.id, userId)
+                                    android.util.Log.d("DiscoverScreen", "✅ Like guardado para ${artist.name}")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("DiscoverScreen", "❌ Error al guardar like: ${e.message}")
+                                }
+                            }
+                        }
+                        player.stop()
+                        currentArtistIndex++
+                    }
+                },
+                onSuperLike = {
+                    if (currentArtistIndex < artists.size) {
+                        val artist = artists[currentArtistIndex]
+                        favoritesManager.addFavorite(artist, "fire")
+                        if (userId.isNotEmpty()) {
+                            scope.launch {
+                                try {
+                                    songLikesManager.likeSong(artist.id, userId)
+                                    android.util.Log.d("DiscoverScreen", "🔥 Super like guardado para ${artist.name}")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("DiscoverScreen", "❌ Error al guardar super like: ${e.message}")
+                                }
+                            }
+                        }
+                        player.stop()
+                        currentArtistIndex++
+                    }
+                },
+                onProfileClick = {
+                    if (currentArtistIndex < artists.size) {
+                        val artist = artists[currentArtistIndex]
+                        if (artist.userId.isNotEmpty()) {
+                            selectedArtistId = artist.userId
+                            showArtistProfile = true
+                            player.pause()
+                        }
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun DiscoverScreenContent(
+    colors: AppColors,
+    isDarkMode: Boolean,
+    onMenuClick: () -> Unit,
+    isLoading: Boolean,
+    artists: List<ArtistCard>,
+    currentArtistIndex: Int,
+    offsetX: Float,
+    offsetY: Float,
+    isPlaying: Boolean,
+    userId: String,
+    player: ExoPlayer,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDislike: () -> Unit,
+    onLike: () -> Unit,
+    onSuperLike: () -> Unit,
+    onProfileClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+    ) {
         // Header con menú hamburguesa
         HypeHeader(
             onMenuClick = onMenuClick,
@@ -874,57 +1046,9 @@ fun DiscoverScreen(
                     offsetX = offsetX,
                     offsetY = offsetY,
                     isPlaying = isPlaying,
-                    onDrag = { dragAmount ->
-                        offsetX += dragAmount.x
-                        offsetY += dragAmount.y
-                    },
-                onDragEnd = {
-                    val artist = artists[currentArtistIndex]
-                    when {
-                        offsetX > 300 -> {
-                            // Swipe derecha = like
-                            favoritesManager.addFavorite(artist, "heart")
-                            // Guardar like en Firebase
-                            if (userId.isNotEmpty()) {
-                                scope.launch {
-                                    try {
-                                        songLikesManager.likeSong(artist.id, userId)
-                                        android.util.Log.d("DiscoverScreen", "✅ Like guardado para ${artist.name}")
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("DiscoverScreen", "❌ Error al guardar like: ${e.message}")
-                                    }
-                                }
-                            }
-                            player.stop()
-                            currentArtistIndex++
-                            offsetX = 0f
-                            offsetY = 0f
-                        }
-                        offsetX < -300 -> {
-                            // Swipe izquierda = dislike
-                            // Guardar como rechazada en Firebase
-                            if (userId.isNotEmpty()) {
-                                scope.launch {
-                                    try {
-                                        firebaseManager.markSongAsRejected(userId, artist.id)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("DiscoverScreen", "Error al marcar como rechazada: ${e.message}")
-                                    }
-                                }
-                            }
-                            // También guardar localmente
-                            favoritesManager.addRejected(artist.id)
-                            player.stop()
-                            currentArtistIndex++
-                            offsetX = 0f
-                            offsetY = 0f
-                        }
-                        else -> {
-                            offsetX = 0f
-                            offsetY = 0f
-                        }
-                    }
-                }
+                    onDrag = onDrag,
+                    onDragEnd = onDragEnd,
+                    onProfileClick = onProfileClick
                 )
             }
         } else {
@@ -955,7 +1079,7 @@ fun DiscoverScreen(
             }
         }
 
-        // Botones de acción
+        // Botones de acción - Orden cambiado: Dislike, Fire (centro), Like
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -964,63 +1088,13 @@ fun DiscoverScreen(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             ActionButton("🤢", PopArtColors.Pink) {
-                if (currentArtistIndex < artists.size) {
-                    val artist = artists[currentArtistIndex]
-                    // Guardar como rechazada en Firebase para que no vuelva a aparecer
-                    if (userId.isNotEmpty()) {
-                        scope.launch {
-                            try {
-                                firebaseManager.markSongAsRejected(userId, artist.id)
-                            } catch (e: Exception) {
-                                android.util.Log.e("DiscoverScreen", "Error al marcar como rechazada: ${e.message}")
-                            }
-                        }
-                    }
-                    // También guardar localmente
-                    favoritesManager.addRejected(artist.id)
-                    player.stop()
-                    currentArtistIndex++
-                }
-            }
-            ActionButton("❤️", PopArtColors.Yellow) {
-                if (currentArtistIndex < artists.size) {
-                    val artist = artists[currentArtistIndex]
-                    // Guardar como favorita localmente
-                    favoritesManager.addFavorite(artist, "heart")
-                    // Guardar like en Firebase
-                    if (userId.isNotEmpty()) {
-                        scope.launch {
-                            try {
-                                songLikesManager.likeSong(artist.id, userId)
-                                android.util.Log.d("DiscoverScreen", "✅ Like guardado para ${artist.name}")
-                            } catch (e: Exception) {
-                                android.util.Log.e("DiscoverScreen", "❌ Error al guardar like: ${e.message}")
-                            }
-                        }
-                    }
-                    player.stop()
-                    currentArtistIndex++
-                }
+                onDislike()
             }
             ActionButton("🔥", PopArtColors.Orange) {
-                if (currentArtistIndex < artists.size) {
-                    val artist = artists[currentArtistIndex]
-                    // Guardar como favorita localmente
-                    favoritesManager.addFavorite(artist, "fire")
-                    // Guardar like en Firebase
-                    if (userId.isNotEmpty()) {
-                        scope.launch {
-                            try {
-                                songLikesManager.likeSong(artist.id, userId)
-                                android.util.Log.d("DiscoverScreen", "🔥 Super like guardado para ${artist.name}")
-                            } catch (e: Exception) {
-                                android.util.Log.e("DiscoverScreen", "❌ Error al guardar super like: ${e.message}")
-                            }
-                        }
-                    }
-                    player.stop()
-                    currentArtistIndex++
-                }
+                onSuperLike()
+            }
+            ActionButton("❤️", PopArtColors.Yellow) {
+                onLike()
             }
         }
         
@@ -1759,7 +1833,11 @@ fun CommentItem(
 
 // PANTALLA 2: TU MÚSICA
 @Composable
-fun MyMusicScreen() {
+fun MyMusicScreen(
+    isDarkMode: Boolean = false,
+    colors: AppColors = getAppColors(false),
+    onMenuClick: () -> Unit = {}
+) {
     val context = LocalContext.current
     val player = rememberMusicPlayer(context, pauseOnBackground = false)
     val firebaseManager = remember { FirebaseManager() }
@@ -1769,7 +1847,9 @@ fun MyMusicScreen() {
     
     val userId = authManager.getUserId() ?: ""
     
+    var selectedTab by remember { mutableStateOf(0) } // 0 = Favoritos, 1 = Siguiendo
     var likedSongs by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
+    var followingSongs by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
     var filteredSongs by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
     var currentPlayingIndex by remember { mutableStateOf<Int?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -1784,8 +1864,15 @@ fun MyMusicScreen() {
         if (userId.isNotEmpty()) {
             try {
                 isLoading = true
+                // Cargar canciones con like
                 likedSongs = songLikesManager.getUserLikedSongsDetails(userId, firebaseManager)
-                filteredSongs = likedSongs
+                // Cargar canciones de artistas que sigue
+                followingSongs = firebaseManager.getSongsFromFollowing(userId)
+                
+                android.util.Log.d("MyMusicScreen", "✅ Canciones favoritas: ${likedSongs.size}")
+                android.util.Log.d("MyMusicScreen", "✅ Canciones de siguiendo: ${followingSongs.size}")
+                
+                filteredSongs = if (selectedTab == 0) likedSongs else followingSongs
                 isLoading = false
             } catch (e: Exception) {
                 android.util.Log.e("MyMusicScreen", "Error cargando canciones: ${e.message}")
@@ -1796,12 +1883,18 @@ fun MyMusicScreen() {
         }
     }
     
+    // Actualizar canciones filtradas cuando cambia la pestaña
+    LaunchedEffect(selectedTab, likedSongs, followingSongs) {
+        filteredSongs = if (selectedTab == 0) likedSongs else followingSongs
+    }
+    
     // Filtrar canciones según búsqueda
-    LaunchedEffect(searchQuery, likedSongs) {
+    LaunchedEffect(searchQuery, selectedTab, likedSongs, followingSongs) {
+        val sourceSongs = if (selectedTab == 0) likedSongs else followingSongs
         filteredSongs = if (searchQuery.isEmpty()) {
-            likedSongs
+            sourceSongs
         } else {
-            likedSongs.filter { song ->
+            sourceSongs.filter { song ->
                 song.name.contains(searchQuery, ignoreCase = true) ||
                 song.genre.contains(searchQuery, ignoreCase = true) ||
                 song.location.contains(searchQuery, ignoreCase = true)
@@ -1823,7 +1916,7 @@ fun MyMusicScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(PopArtColors.Black)
+            .background(colors.background)
             .padding(20.dp)
     ) {
         // Header con título y botón de búsqueda
@@ -1860,6 +1953,70 @@ fun MyMusicScreen() {
             }
         }
 
+        // Pestañas: Favoritos / Siguiendo
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Pestaña Favoritos
+            Button(
+                onClick = { selectedTab = 0 },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedTab == 0) PopArtColors.Yellow else PopArtColors.White.copy(alpha = 0.2f)
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "❤️",
+                        fontSize = 20.sp
+                    )
+                    Text(
+                        "Favoritos",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedTab == 0) PopArtColors.Black else PopArtColors.White
+                    )
+                }
+            }
+            
+            // Pestaña Siguiendo
+            Button(
+                onClick = { selectedTab = 1 },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedTab == 1) PopArtColors.Yellow else PopArtColors.White.copy(alpha = 0.2f)
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "👥",
+                        fontSize = 20.sp
+                    )
+                    Text(
+                        "Siguiendo",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedTab == 1) PopArtColors.Black else PopArtColors.White
+                    )
+                }
+            }
+        }
+        
         // Barra de búsqueda (se muestra cuando isSearching es true)
         if (isSearching) {
             OutlinedTextField(
@@ -1868,32 +2025,32 @@ fun MyMusicScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp),
-                placeholder = { Text("Buscar por artista, género o ubicación...", color = PopArtColors.White.copy(alpha = 0.6f)) },
+                placeholder = { Text("Buscar por artista, género o ubicación...", color = colors.text.copy(alpha = 0.6f)) },
                 leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = PopArtColors.Yellow)
+                    Icon(Icons.Default.Search, contentDescription = null, tint = colors.primary)
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpiar", tint = PopArtColors.White)
+                            Icon(Icons.Default.Close, contentDescription = "Limpiar", tint = colors.text)
                         }
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = PopArtColors.White,
-                    unfocusedTextColor = PopArtColors.White,
-                    focusedBorderColor = PopArtColors.Yellow,
-                    unfocusedBorderColor = PopArtColors.White,
-                    cursorColor = PopArtColors.Yellow
+                    focusedTextColor = colors.text,
+                    unfocusedTextColor = colors.text,
+                    focusedBorderColor = colors.primary,
+                    unfocusedBorderColor = colors.text,
+                    cursorColor = colors.primary
                 ),
                 shape = RoundedCornerShape(30.dp),
                 singleLine = true
             )
         } else {
             Text(
-                "Canciones que te gustaron 🎵",
+                if (selectedTab == 0) "Canciones que te gustaron 🎵" else "Canciones de artistas que sigues 👥",
                 fontSize = 18.sp,
-                color = PopArtColors.White,
+                color = colors.text,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
@@ -1961,25 +2118,31 @@ fun MyMusicScreen() {
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = PopArtColors.Yellow)
+                CircularProgressIndicator(color = colors.primary)
             }
-        } else if (likedSongs.isEmpty()) {
+        } else if ((selectedTab == 0 && likedSongs.isEmpty()) || (selectedTab == 1 && followingSongs.isEmpty())) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("💔", fontSize = 80.sp)
                     Text(
-                        "No tienes favoritos aún",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
-                        color = PopArtColors.Yellow
+                        if (selectedTab == 0) "💔" else "👥",
+                        fontSize = 80.sp
                     )
                     Text(
-                        "Dale ❤️ a las canciones que te gusten en Descubre",
+                        if (selectedTab == 0) "No tienes favoritos aún" else "No sigues a nadie aún",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        color = colors.primary
+                    )
+                    Text(
+                        if (selectedTab == 0) 
+                            "Dale ❤️ a las canciones que te gusten en Descubre"
+                        else
+                            "Sigue a artistas para ver sus canciones aquí",
                         fontSize = 14.sp,
-                        color = PopArtColors.White,
+                        color = colors.text,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 40.dp)
                     )
@@ -2797,7 +2960,7 @@ fun ContestsContent(
 
 // Funciones auxiliares de Discover - Ver DiscoverHelpers.kt
 
-// Burbuja flotante de comentarios relevantes
+// Burbuja flotante de comentarios relevantes - Ahora con comentarios reales de Firebase
 @Composable
 fun FloatingCommentsBubble(
     artist: ArtistCard,
@@ -2806,38 +2969,36 @@ fun FloatingCommentsBubble(
     val firebaseManager = remember { FirebaseManager() }
     var topComments by remember { mutableStateOf<List<VideoComment>>(emptyList()) }
     var showBubble by remember { mutableStateOf(false) }
+    var currentCommentIndex by remember { mutableStateOf(0) }
     
+    // Cargar comentarios reales desde Firebase
     LaunchedEffect(artist.id) {
-        // Simular comentarios relevantes (en una implementación real, estos vendrían de Firebase)
-        val sampleComments = listOf(
-            VideoComment(
-                id = "1",
-                username = "MusicLover",
-                text = "¡Increíble talento! 🔥",
-                likes = 15,
-                timestamp = System.currentTimeMillis() - 300000 // 5 min ago
-            ),
-            VideoComment(
-                id = "2", 
-                username = "ArtFan",
-                text = "Esta canción me da vida ✨",
-                likes = 8,
-                timestamp = System.currentTimeMillis() - 600000 // 10 min ago
-            )
-        )
-        topComments = sampleComments
-        
-        // Mostrar burbuja por 3 segundos cada 10 segundos
-        while (true) {
-            kotlinx.coroutines.delay(10000) // Esperar 10 segundos
-            showBubble = true
-            kotlinx.coroutines.delay(3000) // Mostrar por 3 segundos
-            showBubble = false
+        firebaseManager.getCommentsRealtime(artist.id) { comments ->
+            // Filtrar comentarios con al menos 1 like y ordenar por likes
+            topComments = comments
+                .filter { it.likes > 0 }
+                .sortedByDescending { it.likes }
+                .take(10) // Tomar los 10 mejores comentarios
+            
+            android.util.Log.d("FloatingCommentsBubble", "Comentarios cargados: ${topComments.size}")
+        }
+    }
+    
+    // Mostrar burbujas de comentarios cada 8 segundos
+    LaunchedEffect(topComments.size) {
+        if (topComments.isNotEmpty()) {
+            while (true) {
+                kotlinx.coroutines.delay(8000) // Esperar 8 segundos
+                showBubble = true
+                currentCommentIndex = (currentCommentIndex + 1) % topComments.size
+                kotlinx.coroutines.delay(4000) // Mostrar por 4 segundos
+                showBubble = false
+            }
         }
     }
     
     if (showBubble && topComments.isNotEmpty()) {
-        val randomComment = topComments.random()
+        val comment = topComments[currentCommentIndex]
         
         Card(
             modifier = modifier
@@ -2860,7 +3021,7 @@ fun FloatingCommentsBubble(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        randomComment.username.first().toString(),
+                        comment.username.firstOrNull()?.toString() ?: "?",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = PopArtColors.Black
@@ -2871,16 +3032,16 @@ fun FloatingCommentsBubble(
                 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        randomComment.username,
+                        comment.username,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = PopArtColors.Black
                     )
                     Text(
-                        randomComment.text,
+                        comment.text,
                         fontSize = 11.sp,
                         color = PopArtColors.Black.copy(alpha = 0.8f),
-                        maxLines = 1
+                        maxLines = 2
                     )
                 }
                 
@@ -2895,7 +3056,7 @@ fun FloatingCommentsBubble(
                     )
                     Spacer(Modifier.width(2.dp))
                     Text(
-                        randomComment.likes.toString(),
+                        comment.likes.toString(),
                         fontSize = 10.sp,
                         color = PopArtColors.Black,
                         fontWeight = FontWeight.Bold
@@ -3311,6 +3472,7 @@ fun OtherUserProfileScreen(
     val firebaseManager = remember { FirebaseManager() }
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var swipeOffset by remember { mutableStateOf(0f) }
     
     // Cargar perfil del usuario
     LaunchedEffect(userId) {
@@ -3326,11 +3488,32 @@ fun OtherUserProfileScreen(
         }
     }
     
-    // Pantalla completa con fondo
+    // Pantalla completa con fondo y gesto de swipe
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
+            .offset { IntOffset(swipeOffset.roundToInt(), 0) }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        // Solo permitir swipe hacia la derecha (volver)
+                        if (dragAmount.x > 0) {
+                            swipeOffset = (swipeOffset + dragAmount.x).coerceAtMost(size.width.toFloat())
+                        }
+                    },
+                    onDragEnd = {
+                        // Si el swipe es mayor al 30% del ancho, volver
+                        if (swipeOffset > size.width * 0.3f) {
+                            onBack()
+                        } else {
+                            // Volver a la posición original
+                            swipeOffset = 0f
+                        }
+                    }
+                )
+            }
     ) {
         if (isLoading) {
             // Loading state

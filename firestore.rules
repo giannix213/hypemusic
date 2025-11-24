@@ -1,0 +1,100 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============ REGLAS PARA LIVE STREAMING ============
+    
+    // Sesiones de Live: Lectura pública, escritura autenticada
+    match /live_sessions/{sessionId} {
+      // ✅ CRÍTICO: Permitir lectura pública para que espectadores sin login vean Lives
+      allow read: if true;
+      
+      // ✅ Solo usuarios autenticados pueden crear/actualizar Lives
+      allow write: if request.auth != null;
+    }
+    
+    // ============ REGLAS PARA USUARIOS ============
+    
+    // Perfiles de usuario
+    match /users/{userId} {
+      // Cualquiera puede leer perfiles
+      allow read: if true;
+      
+      // Solo el dueño puede escribir su perfil
+      allow write: if request.auth != null && request.auth.uid == userId;
+      
+      // Subcolecciones del usuario
+      match /{document=**} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // ============ REGLAS PARA CANCIONES ============
+    
+    // Canciones: Lectura pública, escritura autenticada
+    match /songs/{songId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+      
+      // Comentarios de canciones
+      match /comments/{commentId} {
+        allow read: if true;
+        allow write: if request.auth != null;
+        
+        // Respuestas a comentarios
+        match /replies/{replyId} {
+          allow read: if true;
+          allow write: if request.auth != null;
+        }
+        
+        // Likes en comentarios
+        match /likes/{likeId} {
+          allow read: if true;
+          allow write: if request.auth != null;
+        }
+      }
+      
+      // Likes en canciones
+      match /likes/{likeId} {
+        allow read: if true;
+        allow write: if request.auth != null;
+      }
+    }
+    
+    // ============ REGLAS PARA HISTORIAS/STORIES ============
+    
+    // Historias: Lectura pública, escritura autenticada
+    match /stories/{storyId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    // ============ REGLAS PARA VIDEOS DE CONCURSOS ============
+    
+    // Videos de concursos: Lectura pública, escritura autenticada
+    match /contest_entries/{entryId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+      
+      // Comentarios de videos
+      match /comments/{commentId} {
+        allow read: if true;
+        allow write: if request.auth != null;
+      }
+      
+      // Likes en videos
+      match /likes/{likeId} {
+        allow read: if true;
+        allow write: if request.auth != null;
+      }
+    }
+    
+    // ============ REGLA POR DEFECTO ============
+    
+    // Denegar acceso a cualquier otra colección no especificada
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

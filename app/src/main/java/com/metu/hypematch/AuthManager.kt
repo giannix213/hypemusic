@@ -18,10 +18,7 @@ class AuthManager(private val context: Context) {
     private var googleSignInClient: GoogleSignInClient? = null
 
     init {
-        // Configurar Google Sign-In - Temporalmente desactivado hasta configurar SHA correcto
-        googleSignInClient = null
-        
-        /* Descomentar cuando tengas el SHA correcto:
+        // Configurar Google Sign-In - ACTIVADO con SHA configurados
         try {
             val clientId = context.getString(R.string.default_web_client_id)
             if (clientId != "YOUR_WEB_CLIENT_ID_HERE") {
@@ -31,17 +28,20 @@ class AuthManager(private val context: Context) {
                     .build()
                 
                 googleSignInClient = GoogleSignIn.getClient(context, gso)
+                android.util.Log.d("AuthManager", "✅ Google Sign-In configurado correctamente")
+            } else {
+                googleSignInClient = null
+                android.util.Log.w("AuthManager", "⚠️ Web Client ID no configurado")
             }
         } catch (e: Exception) {
             googleSignInClient = null
+            android.util.Log.e("AuthManager", "❌ Error configurando Google Sign-In: ${e.message}", e)
         }
-        */
     }
     
     // Verificar si Google Sign-In está disponible
     fun isGoogleSignInAvailable(): Boolean {
-        return false // Temporalmente desactivado
-        // return googleSignInClient != null
+        return googleSignInClient != null
     }
 
     // Obtener usuario actual
@@ -157,9 +157,14 @@ class AuthManager(private val context: Context) {
             if (email.isBlank()) {
                 throw Exception("El email no puede estar vacío")
             }
+            
+            android.util.Log.d("AuthManager", "🔄 Intentando enviar email de recuperación a: $email")
             auth.sendPasswordResetEmail(email).await()
+            android.util.Log.d("AuthManager", "✅ Email de recuperación enviado exitosamente a: $email")
+            android.util.Log.d("AuthManager", "📧 Revisa tu bandeja de entrada y spam")
         } catch (e: Exception) {
-            android.util.Log.e("AuthManager", "Error en resetPassword: ${e.message}", e)
+            android.util.Log.e("AuthManager", "❌ Error en resetPassword para $email: ${e.message}", e)
+            android.util.Log.e("AuthManager", "Tipo de error: ${e.javaClass.simpleName}")
             throw Exception("Error al enviar email de recuperación: ${e.message}")
         }
     }

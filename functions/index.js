@@ -34,8 +34,10 @@ exports.generateAgoraToken = functions.https.onCall((data, context) => {
     // Determinar el rol
     const role = roleStr === 'publisher' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
     
-    // Configurar expiración (1 hora)
-    const expirationTimeInSeconds = 3600;
+    // Configurar expiración según el rol
+    // Publisher (emisor): 2 horas (7200s)
+    // Subscriber (espectador): 1 hora (3600s)
+    const expirationTimeInSeconds = roleStr === 'publisher' ? 7200 : 3600;
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
     

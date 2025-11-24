@@ -2451,4 +2451,74 @@ class FirebaseManager {
             }
     }
     
+    // ============================================
+    // FUNCIÓN PARA OBTENER CANCIONES DE ARTISTAS SEGUIDOS
+    // ============================================
+    
+    /**
+     * Obtiene las canciones de los artistas que el usuario sigue
+     */
+    suspend fun getSongsFromFollowing(userId: String): List<ArtistCard> {
+        return try {
+            // Obtener lista de usuarios que sigue usando la subcolección existente
+            val followingSnapshot = firestore.collection("users")
+                .document(userId)
+                .collection("following")
+                .get()
+                .await()
+            
+            val following: List<String> = followingSnapshot.documents.map { it.id }
+            
+            if (following.isEmpty()) {
+                android.util.Log.d("FirebaseManager", "📭 Usuario no sigue a nadie")
+                return emptyList()
+            }
+            
+            android.util.Log.d("FirebaseManager", "🎵 Buscando canciones de ${following.size} artistas seguidos")
+            
+            // Obtener canciones de esos artistas
+            val songs: MutableList<ArtistCard> = mutableListOf()
+            
+            // Firestore tiene límite de 10 elementos en whereIn, así que dividimos en chunks
+            following.chunked(10).forEach { chunk: List<String> ->
+                val snapshot: com.google.firebase.firestore.QuerySnapshot = firestore.collection("songs")
+                    .whereIn("artistId", chunk)
+                    .orderBy("uploadDate", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .get()
+                    .await()
+                
+                snapshot.documents.forEach { doc ->
+                    try {
+                        val song = ArtistCard(
+                            id = doc.id,
+                            userId = doc.getString("artistId") ?: "",
+                            name = doc.getString("artistName") ?: "Artista Desconocido",
+                            emoji = "🎵",
+                            genre = doc.getString("genre") ?: "Desconocido",
+                            location = doc.getString("location") ?: "Desconocido",
+                            bio = doc.getString("bio") ?: "",
+                            photos = emptyList(),
+                            imageUrl = doc.getString("imageUrl") ?: "",
+                            socialLinks = emptyMap(),
+                            stats = ArtistStats(
+                                followers = "0",
+                                songs = 0,
+                                plays = (doc.getLong("plays") ?: 0).toString()
+                            ),
+                            songUrl = doc.getString("audioUrl") ?: ""
+                        )
+                        songs.add(song)
+                    } catch (e: Exception) {
+                        android.util.Log.e("FirebaseManager", "Error parseando canción: ${e.message}")
+                    }
+                }
+            }
+            
+            android.util.Log.d("FirebaseManager", "✅ Encontradas ${songs.size} canciones de artistas seguidos")
+            songs
+        } catch (e: Exception) {
+            android.util.Log.e("FirebaseManager", "❌ Error obteniendo canciones de following: ${e.message}")
+            emptyList()
+        }
+    }
 }

@@ -3,6 +3,9 @@ package com.metu.hypematch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,7 +16,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -30,6 +35,7 @@ fun AuthScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val authManager = remember { AuthManager(context) }
+    val focusManager = LocalFocusManager.current
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var showEmailAuth by remember { mutableStateOf(false) }
@@ -67,6 +73,11 @@ fun AuthScreen(
             .background(PopArtColors.Black)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    focusManager.clearFocus()
+                })
+            }
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -236,44 +247,47 @@ fun AuthScreen(
 
                 Spacer(Modifier.height(24.dp))
 
-                // Botón Google (solo si está configurado)
-                if (authManager.isGoogleSignInAvailable()) {
-                    Button(
-                        onClick = {
-                            isLoading = true
-                            errorMessage = ""
-                            try {
+                // Botón Google
+                Button(
+                    onClick = {
+                        isLoading = true
+                        errorMessage = ""
+                        try {
+                            if (authManager.isGoogleSignInAvailable()) {
                                 val signInIntent = authManager.getGoogleSignInIntent()
                                 googleSignInLauncher.launch(signInIntent)
-                            } catch (e: Exception) {
-                                errorMessage = "Error al iniciar Google Sign-In: ${e.message}"
+                            } else {
+                                errorMessage = "Google Sign-In no está configurado. Por favor configura tu proyecto en Firebase."
                                 isLoading = false
                             }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.White),
-                        shape = RoundedCornerShape(30.dp),
-                        enabled = !isLoading
-                    ) {
-                        Icon(
-                            Icons.Default.AccountCircle,
-                            contentDescription = null,
-                            tint = PopArtColors.Black,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            "Continuar con Google",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = PopArtColors.Black
-                        )
-                    }
-
-                    Spacer(Modifier.height(16.dp))
+                        } catch (e: Exception) {
+                            errorMessage = "Error al iniciar Google Sign-In: ${e.message}"
+                            isLoading = false
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.White),
+                    shape = RoundedCornerShape(30.dp),
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Default.AccountCircle,
+                        contentDescription = null,
+                        tint = PopArtColors.Black,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Continuar con Google",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PopArtColors.Black
+                    )
                 }
+
+                Spacer(Modifier.height(16.dp))
 
                 // Botón Invitado
                 TextButton(
@@ -441,17 +455,26 @@ fun AuthScreen(
     // Diálogo de recuperación de contraseña
     if (showForgotPassword) {
         ForgotPasswordDialog(
-            onDismiss = { showForgotPassword = false },
+            onDismiss = { 
+                showForgotPassword = false
+                errorMessage = "" // Limpiar mensaje al cerrar
+            },
             onSendEmail = { resetEmail ->
                 scope.launch {
                     try {
                         isLoading = true
                         authManager.resetPassword(resetEmail)
-                        showForgotPassword = false
-                        errorMessage = "✅ Email de recuperación enviado a $resetEmail"
                         isLoading = false
+                        // El diálogo mostrará el mensaje de éxito internamente
                     } catch (e: Exception) {
-                        errorMessage = "Error al enviar email: ${e.message}"
+                        showForgotPassword = false
+                        errorMessage = when {
+                            e.message?.contains("user not found") == true -> 
+                                "No existe una cuenta con este email"
+                            e.message?.contains("invalid email") == true -> 
+                                "Email inválido. Usa el formato: usuario@dominio.com"
+                            else -> "Error al enviar email: ${e.message}"
+                        }
                         isLoading = false
                     }
                 }
@@ -466,63 +489,148 @@ fun ForgotPasswordDialog(
     onSendEmail: (String) -> Unit
 ) {
     var resetEmail by remember { mutableStateOf("") }
+    var emailSent by remember { mutableStateOf(false) }
     
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                "Recuperar Contraseña",
+                if (emailSent) "Email Enviado" else "Recuperar Contraseña",
                 fontWeight = FontWeight.Bold,
                 color = PopArtColors.Black
             )
         },
         text = {
             Column {
-                Text(
-                    "Ingresa tu email y te enviaremos un enlace para restablecer tu contraseña.",
-                    color = PopArtColors.Black,
-                    fontSize = 14.sp
-                )
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = resetEmail,
-                    onValueChange = { resetEmail = it },
-                    label = { Text("Email") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PopArtColors.Yellow,
-                        unfocusedBorderColor = PopArtColors.Black.copy(alpha = 0.5f),
-                        focusedLabelColor = PopArtColors.Yellow,
-                        unfocusedLabelColor = PopArtColors.Black.copy(alpha = 0.7f),
-                        cursorColor = PopArtColors.Yellow
+                if (emailSent) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = PopArtColors.Yellow,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .align(Alignment.CenterHorizontally)
                     )
-                )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Hemos enviado un enlace de recuperación a:",
+                        color = PopArtColors.Black,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        resetEmail,
+                        color = PopArtColors.Black,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Por favor:\n1. Revisa tu bandeja de entrada\n2. Abre el enlace del email\n3. Crea tu nueva contraseña\n4. Regresa aquí e inicia sesión",
+                        color = PopArtColors.Black.copy(alpha = 0.8f),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = PopArtColors.Yellow.copy(alpha = 0.2f)
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                "⚠️ IMPORTANTE",
+                                color = PopArtColors.Black,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "El email probablemente está en tu carpeta de SPAM o Correo no deseado",
+                                color = PopArtColors.Black.copy(alpha = 0.8f),
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 16.sp
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Busca emails de: noreply@hype-13966.firebaseapp.com",
+                                color = PopArtColors.Black.copy(alpha = 0.6f),
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        "Ingresa tu email y te enviaremos un enlace para restablecer tu contraseña.",
+                        color = PopArtColors.Black,
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = resetEmail,
+                        onValueChange = { resetEmail = it },
+                        label = { Text("Email") },
+                        placeholder = { Text("usuario@ejemplo.com") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = PopArtColors.Yellow,
+                            unfocusedBorderColor = PopArtColors.Black.copy(alpha = 0.5f),
+                            focusedLabelColor = PopArtColors.Yellow,
+                            unfocusedLabelColor = PopArtColors.Black.copy(alpha = 0.7f),
+                            cursorColor = PopArtColors.Yellow
+                        )
+                    )
+                }
             }
         },
         confirmButton = {
-            Button(
-                onClick = { 
-                    if (resetEmail.isNotBlank()) {
-                        onSendEmail(resetEmail)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.Yellow),
-                enabled = resetEmail.isNotBlank()
-            ) {
-                Text(
-                    "Enviar",
-                    color = PopArtColors.Black,
-                    fontWeight = FontWeight.Bold
-                )
+            if (emailSent) {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.Yellow)
+                ) {
+                    Text(
+                        "Entendido",
+                        color = PopArtColors.Black,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Button(
+                    onClick = { 
+                        if (resetEmail.isNotBlank()) {
+                            onSendEmail(resetEmail)
+                            emailSent = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.Yellow),
+                    enabled = resetEmail.isNotBlank()
+                ) {
+                    Text(
+                        "Enviar Email",
+                        color = PopArtColors.Black,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(
-                    "Cancelar",
-                    color = PopArtColors.Black.copy(alpha = 0.7f)
-                )
+            if (!emailSent) {
+                TextButton(onClick = onDismiss) {
+                    Text(
+                        "Cancelar",
+                        color = PopArtColors.Black.copy(alpha = 0.7f)
+                    )
+                }
             }
         },
         containerColor = PopArtColors.White
@@ -695,14 +803,42 @@ fun EmailVerificationScreen(
         
         Spacer(Modifier.height(16.dp))
         
-        // Nota sobre spam
-        Text(
-            "💡 Si no ves el email, revisa tu carpeta de spam",
-            fontSize = 12.sp,
-            color = PopArtColors.White.copy(alpha = 0.6f),
-            textAlign = TextAlign.Center,
-            lineHeight = 16.sp
-        )
+        // Nota sobre spam - MÁS VISIBLE
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = PopArtColors.Yellow.copy(alpha = 0.15f)
+            ),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "⚠️ REVISA TU SPAM",
+                    fontSize = 14.sp,
+                    color = PopArtColors.Yellow,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Los emails de verificación suelen llegar a la carpeta de Correo no deseado o Spam",
+                    fontSize = 12.sp,
+                    color = PopArtColors.White.copy(alpha = 0.9f),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Busca: noreply@hype-13966.firebaseapp.com",
+                    fontSize = 11.sp,
+                    color = PopArtColors.White.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
     }
 }
 
@@ -725,9 +861,16 @@ fun EmailAuthForm(
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     
     Column(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    focusManager.clearFocus()
+                })
+            }
     ) {
         // Botón volver
         IconButton(

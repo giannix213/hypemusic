@@ -29,20 +29,24 @@ import io.agora.rtc2.IRtcEngineEventHandler
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.RtcEngineConfig
 import io.agora.rtc2.video.VideoCanvas
+import kotlinx.coroutines.tasks.await
 
 /**
  * Pantalla de visualización de Live Stream con Agora SDK.
  * El espectador ve la transmisión del streamer en tiempo real.
  */
 @Composable
-fun LiveStreamViewerScreen(
+fun
+        LiveStreamViewerScreen(
     sessionId: String,
     channelName: String,
-    agoraToken: String,
+    agoraToken: String,  // Token del emisor (NO se usará)
     streamerName: String = "Streamer",
     onExit: () -> Unit
 ) {
     val context = LocalContext.current
+    val firebaseManager = remember { FirebaseManager() }
+    
     var isConnected by remember { mutableStateOf(false) }
     var viewerCount by remember { mutableStateOf(0) }
     var hasPermissions by remember { mutableStateOf(false) }
@@ -50,6 +54,42 @@ fun LiveStreamViewerScreen(
     var remoteSurfaceView by remember { mutableStateOf<SurfaceView?>(null) }
     var remoteUid by remember { mutableStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
+    var viewerToken by remember { mutableStateOf<String?>(null) }
+    var tokenError by remember { mutableStateOf<String?>(null) }
+    
+    // Generar token de espectador
+    LaunchedEffect(channelName) {
+        try {
+            android.util.Log.d("LiveViewer", "🔑 Generando token de espectador...")
+            android.util.Log.d("LiveViewer", "   Canal: $channelName")
+            
+            val functions = com.google.firebase.functions.FirebaseFunctions.getInstance()
+            val data = hashMapOf(
+                "channelName" to channelName,
+                "role" to "subscriber",  // ← CRÍTICO: subscriber, no publisher
+                "uid" to 0
+            )
+            
+            val result = functions
+                .getHttpsCallable("generateAgoraToken")
+                .call(data)
+                .await()
+            
+            val resultData = result.data as? Map<*, *>
+            val token = resultData?.get("token") as? String
+            
+            if (token != null) {
+                viewerToken = token
+                android.util.Log.d("LiveViewer", "✅ Token de espectador recibido: ${token.take(20)}...")
+            } else {
+                tokenError = "No se recibió token"
+                android.util.Log.e("LiveViewer", "❌ No se recibió token de espectador")
+            }
+        } catch (e: Exception) {
+            tokenError = e.message
+            android.util.Log.e("LiveViewer", "❌ Error generando token: ${e.message}", e)
+        }
+    }
     
     // Solo necesitamos permiso de audio para escuchar
     val permissions = arrayOf(Manifest.permission.RECORD_AUDIO)
@@ -79,14 +119,14 @@ fun LiveStreamViewerScreen(
         }
     }
     
-    // Inicializar Agora cuando tengamos permisos
-    LaunchedEffect(hasPermissions) {
-        if (hasPermissions && agoraEngine == null) {
+    // Inicializar Agora cuando tengamos permisos Y token de espectador
+    LaunchedEffect(hasPermissions, viewerToken) {
+        if (hasPermissions && viewerToken != null && agoraEngine == null) {
             try {
                 android.util.Log.d("LiveViewer", "📺 Inicializando Agora SDK como espectador...")
                 android.util.Log.d("LiveViewer", "   App ID: ${AgoraConfig.APP_ID}")
                 android.util.Log.d("LiveViewer", "   Canal: $channelName")
-                android.util.Log.d("LiveViewer", "   Token: ${agoraToken.take(20)}...")
+                android.util.Log.d("LiveViewer", "   Token de espectador: ${viewerToken?.take(20)}...")
                 
                 // Configurar Agora
                 val config = RtcEngineConfig().apply {
@@ -145,8 +185,8 @@ fun LiveStreamViewerScreen(
                     autoSubscribeVideo = true
                 }
                 
-                // Unirse al canal
-                val result = engine.joinChannel(agoraToken, channelName, 0, options)
+                // Unirse al canal con el token de espectador
+                val result = engine.joinChannel(viewerToken, channelName, 0, options)
                 
                 if (result == 0) {
                     android.util.Log.d("LiveViewer", "📡 Uniéndose al canal como espectador...")
