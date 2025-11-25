@@ -2,6 +2,7 @@ package com.metu.hypematch
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -15,9 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Pantalla temporal de Visualización de Live Streaming
- * Pendiente: Migrar de Agora a ZegoCloud
- * Ver: MIGRACION_ZEGOCLOUD_PENDIENTE.md
+ * Pantalla de Visualización de Live - Migración a ZegoCloud en Progreso
  */
 @Composable
 fun LiveStreamViewerScreen(
@@ -46,7 +45,7 @@ fun LiveStreamViewerScreen(
             )
         }
         
-        // Mensaje central
+        // Contenido
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -71,72 +70,65 @@ fun LiveStreamViewerScreen(
             Spacer(Modifier.height(16.dp))
             
             Text(
-                "Migrando de Agora a ZegoCloud",
+                "Migración a ZegoCloud",
                 fontSize = 18.sp,
                 color = Color.White,
                 textAlign = TextAlign.Center
             )
             
-            Spacer(Modifier.height(8.dp))
-            
-            Text(
-                "Próximamente disponible",
-                fontSize = 14.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center
-            )
-            
             Spacer(Modifier.height(32.dp))
             
-            // Información del stream
+            // Card con información
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = PopArtColors.Purple.copy(alpha = 0.2f)
-                )
+                ),
+                shape = RoundedCornerShape(16.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(20.dp)
                 ) {
                     Text(
-                        "Información del Stream",
+                        "Información del Live",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = PopArtColors.Cyan
                     )
                     
+                    Spacer(Modifier.height(12.dp))
+                    
+                    Text(
+                        "• Streamer: $streamerName",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                    
+                    Text(
+                        "• Canal: $channelName",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                    
+                    Spacer(Modifier.height(12.dp))
+                    
+                    Divider(color = Color.White.copy(alpha = 0.2f))
+                    
+                    Spacer(Modifier.height(12.dp))
+                    
+                    Text(
+                        "⏳ SDK de ZegoCloud no disponible",
+                        fontSize = 12.sp,
+                        color = PopArtColors.Yellow.copy(alpha = 0.8f),
+                        lineHeight = 18.sp
+                    )
+                    
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        "Streamer: $streamerName",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "Canal: $channelName",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "Session ID: $sessionId",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "⏳ Pendiente: Integrar SDK de ZegoCloud",
-                        fontSize = 12.sp,
-                        color = PopArtColors.Yellow.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "📖 Ver: MIGRACION_ZEGOCLOUD_PENDIENTE.md",
+                        "📖 Ver: ZEGOCLOUD_IMPLEMENTACION_FINAL.md",
                         fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.6f)
+                        color = PopArtColors.Cyan.copy(alpha = 0.8f)
                     )
                 }
             }
@@ -147,9 +139,10 @@ fun LiveStreamViewerScreen(
                 onClick = onExit,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PopArtColors.Pink
-                )
+                ),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Volver")
+                Text("Volver", fontSize = 16.sp)
             }
         }
     }
