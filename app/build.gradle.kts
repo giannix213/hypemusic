@@ -119,8 +119,10 @@ dependencies {
     // ZXing para generar códigos QR
     implementation("com.google.zxing:core:3.5.2")
     
-    // Agora SDK para Live Streaming
-    implementation("io.agora.rtc:full-sdk:4.2.6")
+    // ZegoCloud SDK para Live Streaming
+    // TODO: Descomentar y usar la versión correcta según CONFIGURAR_ZEGOCLOUD.md
+    // implementation("im.zego:express-video:3.14.5")
+    // O usar: implementation("im.zego:zego-express-engine:3.14.5")
 
     // Testing
     testImplementation(libs.junit)

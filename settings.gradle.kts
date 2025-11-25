@@ -16,6 +16,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // ZegoCloud repository
+        maven { url = uri("https://storage.zego.im/maven2") }
+        // JitPack for ZegoCloud
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
