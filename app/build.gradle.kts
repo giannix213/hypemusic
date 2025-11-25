@@ -120,9 +120,9 @@ dependencies {
     implementation("com.google.zxing:core:3.5.2")
     
     // ZegoCloud SDK para Live Streaming
-    // TODO: Descomentar y usar la versión correcta según CONFIGURAR_ZEGOCLOUD.md
-    // implementation("im.zego:express-video:3.14.5")
-    // O usar: implementation("im.zego:zego-express-engine:3.14.5")
+    // NOTA: La versión específica no está disponible en Maven
+    // Ver INSTRUCCIONES_ZEGOCLOUD_MANUAL.md para configuración manual
+    // implementation("im.zego:zego-express-engine:3.14.0")
 
     // Testing
     testImplementation(libs.junit)
