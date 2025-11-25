@@ -119,10 +119,10 @@ dependencies {
     // ZXing para generar códigos QR
     implementation("com.google.zxing:core:3.5.2")
     
-    // ZegoCloud Express SDK para Live Streaming
-    // Nota: El UIKit no está disponible en Maven, usando SDK base
-    // TODO: Implementar UI personalizada con Express SDK
-    // implementation("im.zego:express-video:3.14.0")
+    // ZegoCloud - Comentado temporalmente hasta obtener el SDK
+    // Opción 1: Descargar manualmente desde https://doc-zh.zego.im/article/13783
+    // Opción 2: Usar WebRTC nativo de Android
+    // TODO: Implementar live streaming con alternativa disponible
 
     // Testing
     testImplementation(libs.junit)
