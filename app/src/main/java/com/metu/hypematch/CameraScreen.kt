@@ -7,8 +7,10 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -34,7 +36,8 @@ import java.util.concurrent.Executors
 @Composable
 fun CameraRecordingScreen(
     onBack: () -> Unit,
-    onVideoRecorded: (Uri) -> Unit
+    onVideoRecorded: (Uri) -> Unit,
+    onOpenGallery: () -> Unit = {} // Nuevo callback para abrir galería
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -95,6 +98,15 @@ fun CameraRecordingScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(PopArtColors.Black)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    // Detectar swipe hacia arriba (dragAmount negativo)
+                    if (dragAmount < -50 && !isRecording) {
+                        android.util.Log.d("CameraScreen", "📸 Swipe hacia arriba detectado - Abriendo galería")
+                        onOpenGallery()
+                    }
+                }
+            }
     ) {
         // Vista de la cámara
         AndroidView(
@@ -210,6 +222,29 @@ fun CameraRecordingScreen(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black,
                     color = Color.White
+                )
+            }
+        }
+        
+        // Indicador de galería (swipe hacia arriba) - Solo cuando NO está grabando
+        if (isCameraReady && !isRecording) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 140.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Swipe arriba",
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(32.dp)
+                )
+                Text(
+                    "Galería",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
