@@ -42,10 +42,8 @@ fun LiveLauncherScreen(
     val currentUsername = authManager.getUserName()
     
     // Estados locales
-    var showLiveScreen by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var liveSession by remember { mutableStateOf<LiveSession?>(null) }
     
     // Obtener foto de perfil del usuario
     var profileImageUrl by remember { mutableStateOf("") }
@@ -60,8 +58,31 @@ fun LiveLauncherScreen(
         }
     }
     
-    // Función para iniciar el Live
-    fun startLiveSetup() {
+    // 🔑 PASO CLAVE: Lanzador de Permisos
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val cameraGranted = permissions[android.Manifest.permission.CAMERA] == true
+        val audioGranted = permissions[android.Manifest.permission.RECORD_AUDIO] == true
+        
+        android.util.Log.d("LiveLauncher", "📹 Resultado de permisos:")
+        android.util.Log.d("LiveLauncher", "   Cámara: ${if (cameraGranted) "✅ Otorgado" else "❌ Denegado"}")
+        android.util.Log.d("LiveLauncher", "   Audio: ${if (audioGranted) "✅ Otorgado" else "❌ Denegado"}")
+        
+        if (cameraGranted && audioGranted) {
+            // Permisos otorgados, continuar con el setup del Live
+            android.util.Log.d("LiveLauncher", "✅ Permisos otorgados, continuando con setup...")
+            startLiveSetupInternal()
+        } else {
+            // Permisos denegados
+            android.util.Log.e("LiveLauncher", "❌ Permisos denegados por el usuario")
+            errorMessage = "Se necesitan permisos de cámara y micrófono para iniciar un live"
+            isLoading = false
+        }
+    }
+    
+    // Función interna que realmente inicia el Live (después de tener permisos)
+    fun startLiveSetupInternal() {
         android.util.Log.d("LiveLauncher", "🚀 ===== INICIANDO SETUP DE LIVE CON ZEGOCLOUD =====")
         android.util.Log.d("LiveLauncher", "👤 Usuario: $currentUsername ($currentUserId)")
         android.util.Log.d("LiveLauncher", "📸 Foto perfil: $profileImageUrl")
@@ -90,45 +111,76 @@ fun LiveLauncherScreen(
                 android.util.Log.d("LiveLauncher", "   username: $currentUsername")
                 android.util.Log.d("LiveLauncher", "   profileImageUrl: $profileImageUrl")
                 
-                val session = firebaseManager.startNewLiveSession(
+                // 🔧 SOLUCIÓN: ZegoCloud NO necesita token de backend
+                // Solo necesitamos crear un sessionId y channelName únicos
+                val sessionId = firebaseManager.generateSessionId()
+                val channelName = "live_${currentUserId}_${System.currentTimeMillis()}"
+                
+                android.util.Log.d("LiveLauncher", "✅ Sesión creada (sin token de backend)")
+                android.util.Log.d("LiveLauncher", "   SessionId: $sessionId")
+                android.util.Log.d("LiveLauncher", "   Canal: $channelName")
+                android.util.Log.d("LiveLauncher", "   ZegoCloud usa APP_ID y APP_SIGN directamente")
+                
+                // Crear sesión en Firebase (ZegoCloud - sin token)
+                firebaseManager.createLiveSessionZego(
+                    sessionId = sessionId,
                     userId = currentUserId,
                     username = currentUsername,
-                    profileImageUrl = profileImageUrl,
+                    channelName = channelName,
                     title = "Live de $currentUsername"
                 )
                 
-                android.util.Log.d("LiveLauncher", "📦 Respuesta de Firebase: ${if (session != null) "Sesión creada" else "NULL"}")
+                isLoading = false
                 
-                if (session != null) {
-                    android.util.Log.d("LiveLauncher", "✅ Sesión creada exitosamente")
-                    android.util.Log.d("LiveLauncher", "   SessionId: ${session.sessionId}")
-                    android.util.Log.d("LiveLauncher", "   Canal: ${session.agoraChannelName}")
-                    android.util.Log.d("LiveLauncher", "   Token: ${if (session.agoraToken.isNotEmpty()) "Presente" else "VACÍO"}")
-                    android.util.Log.d("LiveLauncher", "   isActive: ${session.isActive}")
-                    
-                    liveSession = session
-                    isLoading = false
-                    
-                    // Mostrar pantalla de ZegoCloud directamente
-                    android.util.Log.d("LiveLauncher", "🎬 Mostrando LiveRecordingScreen...")
-                    showLiveScreen = true
-                    
-                    android.widget.Toast.makeText(context, "✅ Iniciando transmisión...", android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    android.util.Log.e("LiveLauncher", "❌ startNewLiveSession retornó null")
-                    android.util.Log.e("LiveLauncher", "   Posibles causas:")
-                    android.util.Log.e("LiveLauncher", "   - Cloud Function no desplegada")
-                    android.util.Log.e("LiveLauncher", "   - Error en Firebase")
-                    android.util.Log.e("LiveLauncher", "   - Permisos de Firestore")
-                    errorMessage = "No se pudo crear la sesión de Live. Verifica los logs."
-                    isLoading = false
-                }
+                // Lanzar LiveActivity directamente
+                android.util.Log.d("LiveLauncher", "🚀 Lanzando LiveActivity...")
+                val intent = android.content.Intent(context, LiveActivity::class.java)
+                intent.putExtra("userId", currentUserId)
+                intent.putExtra("username", currentUsername)
+                intent.putExtra("channelName", channelName)
+                intent.putExtra("sessionId", sessionId)
+                context.startActivity(intent)
+                
+                android.widget.Toast.makeText(context, "✅ Iniciando transmisión...", android.widget.Toast.LENGTH_SHORT).show()
+                
+                // Cerrar LiveLauncher
+                onClose()
             } catch (e: Exception) {
                 android.util.Log.e("LiveLauncher", "❌ Error en startLiveSetup: ${e.message}", e)
                 android.util.Log.e("LiveLauncher", "   Stack trace:", e)
                 errorMessage = "Error: ${e.message ?: "Desconocido"}"
                 isLoading = false
             }
+        }
+    }
+    
+    // Función pública que verifica permisos antes de iniciar
+    fun startLiveSetup() {
+        android.util.Log.d("LiveLauncher", "🔐 Verificando permisos...")
+        
+        val cameraPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        
+        val audioPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        
+        if (cameraPermission && audioPermission) {
+            // Ya tenemos permisos, continuar directamente
+            android.util.Log.d("LiveLauncher", "✅ Permisos ya otorgados")
+            startLiveSetupInternal()
+        } else {
+            // Solicitar permisos
+            android.util.Log.d("LiveLauncher", "📱 Solicitando permisos al usuario...")
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.CAMERA,
+                    android.Manifest.permission.RECORD_AUDIO
+                )
+            )
         }
     }
     
@@ -139,30 +191,8 @@ fun LiveLauncherScreen(
         }
     }
     
-    // Mostrar pantalla de Live de ZegoCloud cuando esté listo
-    if (showLiveScreen && liveSession != null) {
-        LiveRecordingScreen(
-            sessionId = liveSession!!.sessionId,
-            channelName = liveSession!!.agoraChannelName,
-            agoraToken = liveSession!!.agoraToken,
-            onStreamStarted = {
-                android.util.Log.d("LiveLauncher", "✅ Stream iniciado")
-            },
-            onStreamEnded = {
-                android.util.Log.d("LiveLauncher", "🛑 Stream finalizado")
-                // Finalizar sesión en Firebase
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                    try {
-                        firebaseManager.endLiveSession(liveSession!!.sessionId)
-                    } catch (e: Exception) {
-                        android.util.Log.e("LiveLauncher", "Error finalizando sesión: ${e.message}")
-                    }
-                }
-                onClose()
-            }
-        )
-        return
-    }
+    // Ya no necesitamos mostrar LiveRecordingScreen aquí
+    // LiveActivity se lanza directamente desde startLiveSetupInternal()
     
     // UI según el estado
     when {
@@ -456,4 +486,5 @@ private fun ErrorScreen(
             }
         }
     }
+}
 }

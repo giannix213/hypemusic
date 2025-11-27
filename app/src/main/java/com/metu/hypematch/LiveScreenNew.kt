@@ -595,6 +595,105 @@ fun LiveScreenNew(
                 }
             )
         }
+        showLiveLauncher -> {
+            // 🔧 SOLUCIÓN: Mover LiveLauncher DENTRO del when para evitar superposición
+            LiveLauncherScreen(
+                onClose = { showLiveLauncher = false },
+                onStartBroadcast = { sessionId, channelName, token ->
+                    // Cuando el usuario inicia una transmisión
+                    liveSessionId = sessionId
+                    liveChannelName = channelName
+                    liveAgoraToken = token
+                    showLiveLauncher = false
+                    showBroadcasterScreen = true
+                }
+            )
+        }
+        showBroadcasterScreen -> {
+            // 🔧 SOLUCIÓN DEFINITIVA: Lanzar LiveActivity nativa en lugar de Composable
+            LaunchedEffect(liveSessionId) {
+                if (liveSessionId.isNotEmpty()) {
+                    try {
+                        val userId = authManager.getUserId() ?: ""
+                        val username = authManager.getUserName()
+                        
+                        android.util.Log.d("LiveScreen", "========================================")
+                        android.util.Log.d("LiveScreen", "📝 CREANDO SESIÓN DE LIVE")
+                        android.util.Log.d("LiveScreen", "   SessionId: $liveSessionId")
+                        android.util.Log.d("LiveScreen", "   UserId: $userId")
+                        android.util.Log.d("LiveScreen", "   Username: $username")
+                        android.util.Log.d("LiveScreen", "   ChannelName: $liveChannelName")
+                        android.util.Log.d("LiveScreen", "========================================")
+                        
+                        firebaseManager.createLiveSession(
+                            sessionId = liveSessionId,
+                            userId = userId,
+                            username = username,
+                            channelName = liveChannelName,
+                            title = "Live de $username"
+                        )
+                        
+                        android.util.Log.d("LiveScreen", "✅ Sesión creada exitosamente")
+                        
+                        // Lanzar LiveActivity nativa
+                        val intent = android.content.Intent(context, LiveActivity::class.java)
+                        intent.putExtra("userId", userId)
+                        intent.putExtra("username", username)
+                        intent.putExtra("channelName", liveChannelName)
+                        intent.putExtra("sessionId", liveSessionId)
+                        context.startActivity(intent)
+                        
+                        android.util.Log.d("LiveScreen", "🚀 LiveActivity lanzada")
+                        
+                        // Resetear el estado
+                        showBroadcasterScreen = false
+                        liveSessionId = ""
+                        liveChannelName = ""
+                        liveAgoraToken = ""
+                    } catch (e: Exception) {
+                        android.util.Log.e("LiveScreen", "❌ Error: ${e.message}", e)
+                        showBroadcasterScreen = false
+                    }
+                }
+            }
+            
+            // Mostrar pantalla de carga mientras se lanza la Activity
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = PopArtColors.Yellow)
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Iniciando transmisión...",
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+        showViewerScreen -> {
+            // 🔧 SOLUCIÓN: Mover ViewerScreen DENTRO del when para evitar superposición
+            LiveStreamViewerScreen(
+                sessionId = liveSessionId,
+                channelName = liveChannelName,
+                agoraToken = liveAgoraToken,
+                streamerName = liveStreamerName,
+                onExit = {
+                    android.util.Log.d("LiveScreen", "🚪 Saliendo del Live como espectador")
+                    showViewerScreen = false
+                    liveSessionId = ""
+                    liveChannelName = ""
+                    liveAgoraToken = ""
+                    liveStreamerName = ""
+                }
+            )
+        }
         else -> {
             // PANTALLA PRINCIPAL: Carrusel inmersivo de videos de concursos
             if (isLoadingVideos) {
@@ -653,95 +752,7 @@ fun LiveScreenNew(
         }
     }
     
-    // Mostrar LiveLauncher cuando se active (para iniciar transmisión propia)
-    if (showLiveLauncher) {
-        LiveLauncherScreen(
-            onClose = { showLiveLauncher = false },
-            onStartBroadcast = { sessionId, channelName, token ->
-                // Cuando el usuario inicia una transmisión
-                liveSessionId = sessionId
-                liveChannelName = channelName
-                liveAgoraToken = token
-                showLiveLauncher = false
-                showBroadcasterScreen = true
-            }
-        )
-    }
-    
-    // NUEVA: Pantalla de transmisión en vivo (Streamer/Broadcaster)
-    if (showBroadcasterScreen) {
-        // Crear sesión INMEDIATAMENTE cuando se muestra la pantalla
-        LaunchedEffect(liveSessionId) {
-            if (liveSessionId.isNotEmpty()) {
-                try {
-                    val userId = authManager.getUserId() ?: ""
-                    val username = authManager.getUserName()
-                    
-                    android.util.Log.d("LiveScreen", "========================================")
-                    android.util.Log.d("LiveScreen", "📝 CREANDO SESIÓN DE LIVE")
-                    android.util.Log.d("LiveScreen", "   SessionId: $liveSessionId")
-                    android.util.Log.d("LiveScreen", "   UserId: $userId")
-                    android.util.Log.d("LiveScreen", "   Username: $username")
-                    android.util.Log.d("LiveScreen", "   ChannelName: $liveChannelName")
-                    android.util.Log.d("LiveScreen", "========================================")
-                    
-                    firebaseManager.createLiveSession(
-                        sessionId = liveSessionId,
-                        userId = userId,
-                        username = username,
-                        channelName = liveChannelName,
-                        title = "Live de $username"
-                    )
-                    
-                    android.util.Log.d("LiveScreen", "✅ Sesión creada exitosamente")
-                } catch (e: Exception) {
-                    android.util.Log.e("LiveScreen", "❌ Error creando sesión: ${e.message}", e)
-                }
-            }
-        }
-        
-        LiveRecordingScreen(
-            sessionId = liveSessionId,
-            channelName = liveChannelName,
-            agoraToken = liveAgoraToken,
-            onStreamStarted = {
-                android.util.Log.d("LiveScreen", "✅ Transmisión iniciada (Agora conectado)")
-            },
-            onStreamEnded = {
-                android.util.Log.d("LiveScreen", "🛑 Transmisión finalizada")
-                // Actualizar Firestore: Live terminó
-                scope.launch {
-                    try {
-                        firebaseManager.endLiveSession(liveSessionId)
-                    } catch (e: Exception) {
-                        android.util.Log.e("LiveScreen", "Error finalizando sesión: ${e.message}")
-                    }
-                }
-                showBroadcasterScreen = false
-                liveSessionId = ""
-                liveChannelName = ""
-                liveAgoraToken = ""
-            }
-        )
-    }
-    
-    // NUEVA: Pantalla de visualización de Live (Espectador/Viewer)
-    if (showViewerScreen) {
-        LiveStreamViewerScreen(
-            sessionId = liveSessionId,
-            channelName = liveChannelName,
-            agoraToken = liveAgoraToken,
-            streamerName = liveStreamerName,
-            onExit = {
-                android.util.Log.d("LiveScreen", "🚪 Saliendo del Live como espectador")
-                showViewerScreen = false
-                liveSessionId = ""
-                liveChannelName = ""
-                liveAgoraToken = ""
-                liveStreamerName = ""
-            }
-        )
-    }
+    // ✅ TODAS LAS PANTALLAS AHORA ESTÁN DENTRO DEL WHEN - NO HAY SUPERPOSICIÓN
     
 }
 

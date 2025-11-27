@@ -22,19 +22,81 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 
 // ============================================
 // COMPONENTES PARA TU MÚSICA
 // ============================================
+
+// Componente de video de fondo para el ecualizador
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun VideoEqualizerBackground(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    videoResId: Int = R.raw.ecualizador_video // Nombre de tu video en res/raw/
+) {
+    val context = LocalContext.current
+    
+    // Crear ExoPlayer para el video
+    val videoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            // Configurar para loop infinito
+            repeatMode = Player.REPEAT_MODE_ONE
+            // Sin audio (solo visual)
+            volume = 0f
+            
+            // Cargar video desde recursos
+            val videoUri = Uri.parse("android.resource://${context.packageName}/$videoResId")
+            setMediaItem(MediaItem.fromUri(videoUri))
+            prepare()
+        }
+    }
+    
+    // Controlar reproducción según estado
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            videoPlayer.play()
+        } else {
+            videoPlayer.pause()
+        }
+    }
+    
+    // Limpiar cuando se destruye
+    DisposableEffect(Unit) {
+        onDispose {
+            videoPlayer.release()
+        }
+    }
+    
+    // Vista del video
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = videoPlayer
+                useController = false // Sin controles
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM // Llenar el espacio
+                
+                // Ocultar elementos de UI
+                hideController()
+            }
+        },
+        modifier = modifier
+    )
+}
 
 // Componente de ecualizador animado simple
 @Composable
@@ -1157,21 +1219,25 @@ fun EnhancedMusicPlayerBar(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Ecualizador tipo Spotify (barra completa)
+                // Video de ecualizador (barra completa)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(60.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(PopArtColors.Black.copy(alpha = 0.2f))
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center
                 ) {
-                    SpotifyStyleEqualizer(
+                    // Video de fondo
+                    VideoEqualizerBackground(
                         isPlaying = isPlaying,
-                        barCount = 50,
-                        color = PopArtColors.Black,
-                        maxHeight = 44f
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    
+                    // Overlay opcional para mejor contraste
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(PopArtColors.Black.copy(alpha = 0.1f))
                     )
                 }
 

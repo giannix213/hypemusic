@@ -43,6 +43,14 @@
             </intent-filter>
         </activity>
         
+        <!-- Activity dedicada para Live Streaming con ZegoCloud -->
+        <activity
+            android:name=".LiveActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.HypeMatch" />
+        
+        
         <!-- FileProvider para compartir archivos (cámara, historias) -->
         <provider
             android:name="androidx.core.content.FileProvider"

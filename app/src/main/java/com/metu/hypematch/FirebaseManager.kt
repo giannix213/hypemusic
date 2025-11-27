@@ -2366,7 +2366,7 @@ class FirebaseManager {
     }
     
     /**
-     * Crear una sesión de Live (versión simplificada para compatibilidad)
+     * Crear una sesión de Live (versión simplificada para compatibilidad - LEGACY AGORA)
      * Esta función se usa cuando ya se tiene el sessionId y token generados
      */
     suspend fun createLiveSession(
@@ -2377,7 +2377,7 @@ class FirebaseManager {
         title: String
     ) {
         try {
-            android.util.Log.d("FirebaseManager", "📝 Creando sesión de Live: $sessionId")
+            android.util.Log.d("FirebaseManager", "📝 Creando sesión de Live (Agora): $sessionId")
             
             val sessionData = hashMapOf(
                 "sessionId" to sessionId,
@@ -2389,7 +2389,8 @@ class FirebaseManager {
                 "agoraToken" to "", // El token ya se usó para conectar
                 "startTime" to System.currentTimeMillis(),
                 "isActive" to true,
-                "viewerCount" to 0
+                "viewerCount" to 0,
+                "provider" to "agora"
             )
             
             firestore.collection("live_sessions")
@@ -2400,6 +2401,57 @@ class FirebaseManager {
             android.util.Log.d("FirebaseManager", "✅ Sesión de Live creada: $sessionId")
         } catch (e: Exception) {
             android.util.Log.e("FirebaseManager", "❌ Error creando sesión: ${e.message}")
+            throw e
+        }
+    }
+    
+    /**
+     * Generar un ID único para sesión de Live
+     */
+    fun generateSessionId(): String {
+        return firestore.collection("live_sessions").document().id
+    }
+    
+    /**
+     * Crear sesión de Live para ZegoCloud (sin token de backend)
+     * ZegoCloud usa APP_ID y APP_SIGN directamente, no necesita token del servidor
+     */
+    suspend fun createLiveSessionZego(
+        sessionId: String,
+        userId: String,
+        username: String,
+        channelName: String,
+        title: String
+    ) {
+        try {
+            android.util.Log.d("FirebaseManager", "📝 [ZEGO] Creando sesión de live en Firestore...")
+            android.util.Log.d("FirebaseManager", "   SessionId: $sessionId")
+            android.util.Log.d("FirebaseManager", "   UserId: $userId")
+            android.util.Log.d("FirebaseManager", "   Username: $username")
+            android.util.Log.d("FirebaseManager", "   ChannelName: $channelName")
+            
+            val liveData = hashMapOf(
+                "sessionId" to sessionId,
+                "userId" to userId,
+                "username" to username,
+                "channelName" to channelName,
+                "title" to title,
+                "isActive" to true,
+                "viewerCount" to 0,
+                "startTime" to System.currentTimeMillis(),
+                "provider" to "zegocloud",  // Identificar que usa ZegoCloud
+                "endTime" to null,
+                "createdAt" to com.google.firebase.Timestamp.now()
+            )
+            
+            firestore.collection("live_sessions")
+                .document(sessionId)
+                .set(liveData)
+                .await()
+            
+            android.util.Log.d("FirebaseManager", "✅ [ZEGO] Sesión de live creada exitosamente")
+        } catch (e: Exception) {
+            android.util.Log.e("FirebaseManager", "❌ [ZEGO] Error creando sesión: ${e.message}")
             throw e
         }
     }
@@ -2808,4 +2860,5 @@ class FirebaseManager {
             throw Exception("Error al eliminar datos del usuario: ${e.message}")
         }
     }
+    
 }
