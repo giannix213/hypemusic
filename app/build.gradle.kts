@@ -129,8 +129,9 @@ dependencies {
     // ZXing para generar códigos QR
     implementation("com.google.zxing:core:3.5.2")
     
-    // Agora SDK para Live Streaming
-    implementation("io.agora.rtc:full-sdk:4.2.6")
+    // ZegoCloud UIKit for Live Streaming
+    implementation("com.github.ZEGOCLOUD:zego_uikit_prebuilt_live_streaming_android:+")
+    implementation("com.github.ZEGOCLOUD:zego_uikit_android:+")
     
     // 🚀 FASE 3: Room Database para caché local
     val roomVersion = "2.6.1"

@@ -1,8 +1,8 @@
 package com.metu.hypematch
 
+import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -10,14 +10,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.zegocloud.uikit.prebuilt.livestreaming.ZegoUIKitPrebuiltLiveStreamingConfig
+import com.zegocloud.uikit.prebuilt.livestreaming.ZegoUIKitPrebuiltLiveStreamingFragment
 
 /**
- * Pantalla de Visualización de Live - Migración a ZegoCloud en Progreso
+ * Live Stream Viewer Screen - Audience View
+ * Uses ZegoCloud UIKit for Live Streaming
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveStreamViewerScreen(
     sessionId: String,
@@ -26,123 +31,103 @@ fun LiveStreamViewerScreen(
     streamerName: String,
     onExit: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PopArtColors.Black)
-    ) {
-        // Botón de cerrar
-        IconButton(
-            onClick = onExit,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-        ) {
-            Icon(
-                Icons.Default.Close,
-                contentDescription = "Cerrar",
-                tint = Color.White
+    val context = LocalContext.current
+    val activity = context as? Activity
+    
+    // Get current user info from Firebase
+    val currentUser = remember { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }
+    val userId = currentUser?.uid ?: "guest_${System.currentTimeMillis()}"
+    val userName = currentUser?.displayName ?: "Guest User"
+    
+    DisposableEffect(Unit) {
+        onDispose {
+            // Cleanup when leaving
+        }
+    }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { 
+                    Column {
+                        Text("Watching Live", color = Color.White, fontSize = 16.sp)
+                        Text(streamerName, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onExit) {
+                        Icon(Icons.Default.Close, "Close", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Black
+                )
             )
         }
-        
-        // Contenido
-        Column(
+    ) { padding ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(padding)
+                .background(Color.Black)
         ) {
-            Text(
-                "📺",
-                fontSize = 80.sp
-            )
-            
-            Spacer(Modifier.height(24.dp))
-            
-            Text(
-                "Ver Live Stream",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Black,
-                color = PopArtColors.Cyan
-            )
-            
-            Spacer(Modifier.height(16.dp))
-            
-            Text(
-                "Migración a ZegoCloud",
-                fontSize = 18.sp,
-                color = Color.White,
-                textAlign = TextAlign.Center
-            )
-            
-            Spacer(Modifier.height(32.dp))
-            
-            // Card con información
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = PopArtColors.Purple.copy(alpha = 0.2f)
-                ),
-                shape = RoundedCornerShape(16.dp)
-            ) {
+            if (activity != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        // Configure as AUDIENCE
+                        val config = ZegoUIKitPrebuiltLiveStreamingConfig.audience()
+                        
+                        // Customize config
+                        config.audioVideoViewConfig.showSoundWavesInAudioMode = true
+                        config.bottomMenuBarConfig.audienceButtons = listOf(
+                            com.zegocloud.uikit.prebuilt.livestreaming.ZegoMenuBarButtonName.CHAT_BUTTON
+                        )
+                        
+                        // Create fragment
+                        val fragment = ZegoUIKitPrebuiltLiveStreamingFragment.newInstance(
+                            ZegoConfig.APP_ID,
+                            ZegoConfig.APP_SIGN,
+                            userId,
+                            userName,
+                            channelName, // Use channelName as liveID
+                            config
+                        )
+                        
+                        // Add fragment to container
+                        val fragmentManager = activity.supportFragmentManager
+                        val transaction = fragmentManager.beginTransaction()
+                        val container = android.widget.FrameLayout(ctx).apply {
+                            id = android.view.View.generateViewId()
+                        }
+                        transaction.add(container.id, fragment)
+                        transaction.commitAllowingStateLoss()
+                        
+                        container
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                // Fallback UI
                 Column(
-                    modifier = Modifier.padding(20.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp)
                 ) {
                     Text(
-                        "Información del Live",
-                        fontSize = 16.sp,
+                        text = "⚠️ Unable to join live stream",
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = PopArtColors.Cyan
+                        color = Color.White
                     )
                     
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     
-                    Text(
-                        "• Streamer: $streamerName",
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.9f)
-                    )
-                    
-                    Text(
-                        "• Canal: $channelName",
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.9f)
-                    )
-                    
-                    Spacer(Modifier.height(12.dp))
-                    
-                    Divider(color = Color.White.copy(alpha = 0.2f))
-                    
-                    Spacer(Modifier.height(12.dp))
-                    
-                    Text(
-                        "⏳ SDK de ZegoCloud no disponible",
-                        fontSize = 12.sp,
-                        color = PopArtColors.Yellow.copy(alpha = 0.8f),
-                        lineHeight = 18.sp
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "📖 Ver: ZEGOCLOUD_IMPLEMENTACION_FINAL.md",
-                        fontSize = 11.sp,
-                        color = PopArtColors.Cyan.copy(alpha = 0.8f)
-                    )
+                    Button(onClick = onExit) {
+                        Text("Go Back")
+                    }
                 }
-            }
-            
-            Spacer(Modifier.height(24.dp))
-            
-            Button(
-                onClick = onExit,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PopArtColors.Pink
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Volver", fontSize = 16.sp)
             }
         }
     }
