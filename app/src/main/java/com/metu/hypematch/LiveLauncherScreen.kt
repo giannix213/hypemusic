@@ -64,6 +64,20 @@ fun LiveLauncherScreen(
     fun startLiveSetup() {
         android.util.Log.d("LiveLauncher", "🚀 ===== INICIANDO SETUP DE LIVE CON ZEGOCLOUD =====")
         android.util.Log.d("LiveLauncher", "👤 Usuario: $currentUsername ($currentUserId)")
+        android.util.Log.d("LiveLauncher", "📸 Foto perfil: $profileImageUrl")
+        
+        // Validar que tenemos los datos necesarios
+        if (currentUserId.isEmpty()) {
+            android.util.Log.e("LiveLauncher", "❌ currentUserId está vacío!")
+            errorMessage = "Error: Usuario no identificado"
+            return
+        }
+        
+        if (currentUsername.isEmpty()) {
+            android.util.Log.e("LiveLauncher", "❌ currentUsername está vacío!")
+            errorMessage = "Error: Nombre de usuario no encontrado"
+            return
+        }
         
         isLoading = true
         errorMessage = null
@@ -72,6 +86,9 @@ fun LiveLauncherScreen(
             try {
                 // Crear sesión en Firebase
                 android.util.Log.d("LiveLauncher", "📞 Creando sesión en Firebase...")
+                android.util.Log.d("LiveLauncher", "   userId: $currentUserId")
+                android.util.Log.d("LiveLauncher", "   username: $currentUsername")
+                android.util.Log.d("LiveLauncher", "   profileImageUrl: $profileImageUrl")
                 
                 val session = firebaseManager.startNewLiveSession(
                     userId = currentUserId,
@@ -80,26 +97,36 @@ fun LiveLauncherScreen(
                     title = "Live de $currentUsername"
                 )
                 
+                android.util.Log.d("LiveLauncher", "📦 Respuesta de Firebase: ${if (session != null) "Sesión creada" else "NULL"}")
+                
                 if (session != null) {
                     android.util.Log.d("LiveLauncher", "✅ Sesión creada exitosamente")
                     android.util.Log.d("LiveLauncher", "   SessionId: ${session.sessionId}")
                     android.util.Log.d("LiveLauncher", "   Canal: ${session.agoraChannelName}")
+                    android.util.Log.d("LiveLauncher", "   Token: ${if (session.agoraToken.isNotEmpty()) "Presente" else "VACÍO"}")
+                    android.util.Log.d("LiveLauncher", "   isActive: ${session.isActive}")
                     
                     liveSession = session
                     isLoading = false
                     
                     // Mostrar pantalla de ZegoCloud directamente
+                    android.util.Log.d("LiveLauncher", "🎬 Mostrando LiveRecordingScreen...")
                     showLiveScreen = true
                     
                     android.widget.Toast.makeText(context, "✅ Iniciando transmisión...", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     android.util.Log.e("LiveLauncher", "❌ startNewLiveSession retornó null")
-                    errorMessage = "No se pudo crear la sesión de Live. Intenta de nuevo."
+                    android.util.Log.e("LiveLauncher", "   Posibles causas:")
+                    android.util.Log.e("LiveLauncher", "   - Cloud Function no desplegada")
+                    android.util.Log.e("LiveLauncher", "   - Error en Firebase")
+                    android.util.Log.e("LiveLauncher", "   - Permisos de Firestore")
+                    errorMessage = "No se pudo crear la sesión de Live. Verifica los logs."
                     isLoading = false
                 }
             } catch (e: Exception) {
                 android.util.Log.e("LiveLauncher", "❌ Error en startLiveSetup: ${e.message}", e)
-                errorMessage = e.message ?: "Error desconocido"
+                android.util.Log.e("LiveLauncher", "   Stack trace:", e)
+                errorMessage = "Error: ${e.message ?: "Desconocido"}"
                 isLoading = false
             }
         }
