@@ -16,17 +16,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // JitPack for ZegoCloud UIKit (MUST be before ZegoCloud maven)
-        maven { url = uri("https://jitpack.io") }
-        // ZegoCloud official repository
-        maven { 
-            url = uri("https://storage.zego.im/maven2")
-            isAllowInsecureProtocol = false
-        }
-        // Repositorio alternativo de ZegoCloud
-        maven {
-            url = uri("https://www.jitpack.io")
-        }
+        maven { url = uri("https://maven.zego.im") } // ZegoCloud official repository
+        maven { url = uri("https://www.jitpack.io") } // JitPack for ZegoCloud UIKit
     }
 }
 

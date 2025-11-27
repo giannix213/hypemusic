@@ -5,7 +5,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.zegocloud.uikit.prebuilt.livestreaming.ZegoUIKitPrebuiltLiveStreamingConfig
 import com.zegocloud.uikit.prebuilt.livestreaming.ZegoUIKitPrebuiltLiveStreamingFragment
-import com.zegocloud.uikit.service.defines.ZegoUIKitUser
 
 /**
  * Live Streaming Screen - Host/Streamer
@@ -21,8 +20,19 @@ fun LiveRecordingScreen(
 ) {
     val context = LocalContext.current
     val authManager = remember { AuthManager(context) }
+    val firebaseManager = remember { FirebaseManager() }
     val userId = authManager.getUserId() ?: "user_${System.currentTimeMillis()}"
-    val username = authManager.getUsername() ?: "User"
+    
+    // Obtener username de Firebase
+    var username by remember { mutableStateOf("User") }
+    LaunchedEffect(userId) {
+        try {
+            val profile = firebaseManager.getUserProfile(userId)
+            username = profile?.username ?: "User"
+        } catch (e: Exception) {
+            android.util.Log.e("LiveRecordingScreen", "Error getting username: ${e.message}")
+        }
+    }
     
     LaunchedEffect(Unit) {
         onStreamStarted()
@@ -40,30 +50,15 @@ fun LiveRecordingScreen(
             val config = ZegoUIKitPrebuiltLiveStreamingConfig.host()
             
             // Customize configuration
-            config.apply {
-                // Enable camera and microphone by default
-                turnOnCameraWhenJoining = true
-                turnOnMicrophoneWhenJoining = true
-                
-                // Video configuration for portrait mode
-                videoConfig.apply {
-                    resolution = com.zegocloud.uikit.service.defines.ZegoVideoConfigPreset.PRESET_720P
-                }
-                
-                // Bottom menu buttons for host
-                bottomMenuBarConfig.hostButtons = listOf(
-                    com.zegocloud.uikit.prebuilt.livestreaming.ZegoMenuBarButtonName.TOGGLE_CAMERA_BUTTON,
-                    com.zegocloud.uikit.prebuilt.livestreaming.ZegoMenuBarButtonName.TOGGLE_MICROPHONE_BUTTON,
-                    com.zegocloud.uikit.prebuilt.livestreaming.ZegoMenuBarButtonName.SWITCH_CAMERA_BUTTON,
-                    com.zegocloud.uikit.prebuilt.livestreaming.ZegoMenuBarButtonName.LEAVE_BUTTON
-                )
-            }
+            config.turnOnCameraWhenJoining = true
+            config.turnOnMicrophoneWhenJoining = true
             
             // Create ZegoCloud UIKit Prebuilt fragment
             val fragment = ZegoUIKitPrebuiltLiveStreamingFragment.newInstance(
                 ZegoConfig.APP_ID,
                 ZegoConfig.APP_SIGN,
-                ZegoUIKitUser(userId, username),
+                userId,
+                username,
                 channelName,
                 config
             )
