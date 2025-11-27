@@ -2,8 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
     id("com.google.gms.google-services")
-    id("com.google.devtools.ksp")
 }
 
 android {
@@ -129,9 +129,9 @@ dependencies {
     // ZXing para generar códigos QR
     implementation("com.google.zxing:core:3.5.2")
     
-    // ZegoCloud UIKit for Live Streaming
+    // ZegoCloud UIKit Prebuilt Live Streaming Kit (Official)
     implementation("com.github.ZEGOCLOUD:zego_uikit_prebuilt_live_streaming_android:+")
-    implementation("com.github.ZEGOCLOUD:zego_uikit_android:+")
+    implementation("com.github.ZEGOCLOUD:zego_uikit_signaling_plugin_android:+")
     
     // 🚀 FASE 3: Room Database para caché local
     val roomVersion = "2.6.1"

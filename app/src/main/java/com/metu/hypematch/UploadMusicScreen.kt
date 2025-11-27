@@ -219,7 +219,6 @@ fun UploadMusicScreen(onBack: () -> Unit) {
     val authManager = remember { AuthManager(context) }
     val scope = rememberCoroutineScope()
     val userId = authManager.getUserId() ?: ""
-    val focusManager = LocalFocusManager.current
     
     var title by remember { mutableStateOf("") }
     var artistName by remember { mutableStateOf("") }
