@@ -42,6 +42,7 @@ fun LiveLauncherScreen(
     val currentUsername = authManager.getUserName()
     
     // Estados locales
+    var showLiveScreen by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var liveSession by remember { mutableStateOf<LiveSession?>(null) }
@@ -61,7 +62,7 @@ fun LiveLauncherScreen(
     
     // Función para iniciar el Live
     fun startLiveSetup() {
-        android.util.Log.d("LiveLauncher", "🚀 ===== INICIANDO SETUP DE LIVE =====")
+        android.util.Log.d("LiveLauncher", "🚀 ===== INICIANDO SETUP DE LIVE CON ZEGOCLOUD =====")
         android.util.Log.d("LiveLauncher", "👤 Usuario: $currentUsername ($currentUserId)")
         
         isLoading = true
@@ -69,8 +70,8 @@ fun LiveLauncherScreen(
         
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             try {
-                // Llamar a Firebase para crear la sesión
-                android.util.Log.d("LiveLauncher", "📞 Llamando a startNewLiveSession...")
+                // Crear sesión en Firebase
+                android.util.Log.d("LiveLauncher", "📞 Creando sesión en Firebase...")
                 
                 val session = firebaseManager.startNewLiveSession(
                     userId = currentUserId,
@@ -83,18 +84,14 @@ fun LiveLauncherScreen(
                     android.util.Log.d("LiveLauncher", "✅ Sesión creada exitosamente")
                     android.util.Log.d("LiveLauncher", "   SessionId: ${session.sessionId}")
                     android.util.Log.d("LiveLauncher", "   Canal: ${session.agoraChannelName}")
-                    android.util.Log.d("LiveLauncher", "   Token: ${session.agoraToken.take(20)}...")
-                    android.util.Log.d("LiveLauncher", "   isActive: ${session.isActive}")
                     
                     liveSession = session
                     isLoading = false
                     
-                    // Llamar al callback para navegar
-                    onStartBroadcast(
-                        session.sessionId,
-                        session.agoraChannelName,
-                        session.agoraToken
-                    )
+                    // Mostrar pantalla de ZegoCloud directamente
+                    showLiveScreen = true
+                    
+                    android.widget.Toast.makeText(context, "✅ Iniciando transmisión...", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     android.util.Log.e("LiveLauncher", "❌ startNewLiveSession retornó null")
                     errorMessage = "No se pudo crear la sesión de Live. Intenta de nuevo."
@@ -115,20 +112,33 @@ fun LiveLauncherScreen(
         }
     }
     
-    // Mostrar Toast cuando la sesión está lista
-    LaunchedEffect(liveSession) {
-        liveSession?.let {
-            android.widget.Toast.makeText(context, "✅ Sesión lista! Iniciando transmisión...", android.widget.Toast.LENGTH_SHORT).show()
-        }
+    // Mostrar pantalla de Live de ZegoCloud cuando esté listo
+    if (showLiveScreen && liveSession != null) {
+        LiveRecordingScreen(
+            sessionId = liveSession!!.sessionId,
+            channelName = liveSession!!.agoraChannelName,
+            agoraToken = liveSession!!.agoraToken,
+            onStreamStarted = {
+                android.util.Log.d("LiveLauncher", "✅ Stream iniciado")
+            },
+            onStreamEnded = {
+                android.util.Log.d("LiveLauncher", "🛑 Stream finalizado")
+                // Finalizar sesión en Firebase
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                    try {
+                        firebaseManager.endLiveSession(liveSession!!.sessionId)
+                    } catch (e: Exception) {
+                        android.util.Log.e("LiveLauncher", "Error finalizando sesión: ${e.message}")
+                    }
+                }
+                onClose()
+            }
+        )
+        return
     }
     
     // UI según el estado
     when {
-        liveSession != null -> {
-            // Sesión lista, mostrar pantalla de carga mientras se navega
-            LoadingScreen()
-        }
-        
         isLoading -> {
             // Cargando
             LoadingScreen()
