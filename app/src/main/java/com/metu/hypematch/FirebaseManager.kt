@@ -177,20 +177,37 @@ class FirebaseManager {
         }
     }
 
-    // Obtener todas las canciones (con validación de archivos)
-    suspend fun getAllSongs(): List<ArtistCard> {
-        return try {
-            android.util.Log.d("FirebaseManager", "📥 Obteniendo canciones de Firebase...")
+    // 🚀 OPTIMIZACIÓN 2: PAGINACIÓN - Obtener canciones con límite
+    suspend fun getAllSongs(limit: Long = 10, lastSongId: String? = null): List<ArtistCard> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        return@withContext try {
+            android.util.Log.d("FirebaseManager", "📥 Obteniendo canciones (límite: $limit, cursor: $lastSongId)...")
             
             // Intentar ordenar por uploadDate, si falla obtener sin ordenar
+            var query = firestore.collection("songs")
+                .orderBy("uploadDate", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(limit)
+            
+            // Si hay cursor, continuar desde ahí (paginación)
+            if (lastSongId != null) {
+                try {
+                    val lastDocument = firestore.collection("songs").document(lastSongId).get().await()
+                    if (lastDocument.exists()) {
+                        query = firestore.collection("songs")
+                            .orderBy("uploadDate", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                            .startAfter(lastDocument)
+                            .limit(limit)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("FirebaseManager", "⚠️ Error con cursor, ignorando: ${e.message}")
+                }
+            }
+            
             val snapshot = try {
-                firestore.collection("songs")
-                    .orderBy("uploadDate", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                    .get()
-                    .await()
+                query.get().await()
             } catch (e: Exception) {
                 android.util.Log.w("FirebaseManager", "⚠️ No se pudo ordenar por uploadDate, obteniendo sin ordenar: ${e.message}")
                 firestore.collection("songs")
+                    .limit(limit)
                     .get()
                     .await()
             }
@@ -391,9 +408,9 @@ class FirebaseManager {
         }
     }
     
-    // Obtener videos y fotos de las canciones del usuario
-    suspend fun getUserSongMedia(userId: String): List<String> {
-        return try {
+    // 🚀 OPTIMIZACIÓN 3: DISPATCHERS.IO - Obtener videos y fotos de las canciones del usuario
+    suspend fun getUserSongMedia(userId: String): List<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        return@withContext try {
             val snapshot = firestore.collection("songs")
                 .whereEqualTo("artistId", userId)
                 .get()
@@ -445,14 +462,19 @@ class FirebaseManager {
         }
     }
     
-    // Obtener canciones para el feed "Descubre" (excluyendo las que ya vio el usuario)
-    suspend fun getDiscoverSongs(userId: String, songLikesManager: SongLikesManager): List<ArtistCard> {
-        return try {
-            android.util.Log.d("FirebaseManager", "🔍 getDiscoverSongs - userId: $userId")
+    // 🚀 OPTIMIZACIÓN 2: PAGINACIÓN - Obtener canciones para el feed "Descubre" con límite
+    suspend fun getDiscoverSongs(
+        userId: String, 
+        songLikesManager: SongLikesManager,
+        limit: Long = 10,
+        lastSongId: String? = null
+    ): List<ArtistCard> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        return@withContext try {
+            android.util.Log.d("FirebaseManager", "🔍 getDiscoverSongs - userId: $userId, límite: $limit")
             
-            // Obtener todas las canciones
-            val allSongs = getAllSongs()
-            android.util.Log.d("FirebaseManager", "📊 Total canciones en Firebase: ${allSongs.size}")
+            // Obtener canciones con paginación
+            val allSongs = getAllSongs(limit = limit * 3, lastSongId = lastSongId) // Cargar más para compensar filtros
+            android.util.Log.d("FirebaseManager", "📊 Canciones obtenidas: ${allSongs.size}")
             
             // Obtener canciones que le gustaron
             val likedSongIds = songLikesManager.getUserLikedSongs(userId)
@@ -1429,7 +1451,7 @@ class FirebaseManager {
         }
     }
     
-    // Obtener todas las entradas de concursos (sin duplicados)
+    // Obtener todas las entradas de concursos (sin duplicados y sin usuarios eliminados)
     suspend fun getAllContestEntries(): List<ContestEntry> {
         return try {
             android.util.Log.d("FirebaseManager", "🔍 Obteniendo videos de concursos desde Firestore...")
@@ -1445,6 +1467,7 @@ class FirebaseManager {
             val allEntries = snapshot.documents.mapNotNull { doc ->
                 try {
                     val videoUrl = doc.getString("videoUrl") ?: ""
+                    val userId = doc.getString("userId") ?: ""
                     
                     // Validar que tenga URL de video
                     if (videoUrl.isEmpty()) {
@@ -1454,7 +1477,7 @@ class FirebaseManager {
                     
                     ContestEntry(
                         id = doc.id,
-                        userId = doc.getString("userId") ?: "",
+                        userId = userId,
                         username = doc.getString("username") ?: "Usuario",
                         profilePictureUrl = doc.getString("profilePictureUrl") ?: "",
                         videoUrl = videoUrl,
@@ -1473,8 +1496,33 @@ class FirebaseManager {
             
             android.util.Log.d("FirebaseManager", "📊 Videos parseados: ${allEntries.size}")
             
+            // 🔥 FILTRAR VIDEOS DE USUARIOS QUE YA NO EXISTEN
+            val validEntries = allEntries.filter { entry ->
+                if (entry.userId.isEmpty()) {
+                    android.util.Log.w("FirebaseManager", "⚠️ Video sin userId: ${entry.title}")
+                    return@filter true // Mantener videos sin userId por compatibilidad
+                }
+                
+                // Verificar si el usuario existe
+                val userExists = try {
+                    val userDoc = firestore.collection("users").document(entry.userId).get().await()
+                    userDoc.exists()
+                } catch (e: Exception) {
+                    android.util.Log.e("FirebaseManager", "❌ Error verificando usuario ${entry.userId}: ${e.message}")
+                    true // En caso de error, mantener el video
+                }
+                
+                if (!userExists) {
+                    android.util.Log.w("FirebaseManager", "🗑️ Usuario eliminado, removiendo video: ${entry.username} - ${entry.title}")
+                }
+                
+                userExists
+            }
+            
+            android.util.Log.d("FirebaseManager", "✅ Videos de usuarios válidos: ${validEntries.size} (eliminados: ${allEntries.size - validEntries.size})")
+            
             // Eliminar duplicados por videoUrl (mantener el más reciente)
-            val uniqueEntries = allEntries
+            val uniqueEntries = validEntries
                 .groupBy { it.videoUrl }
                 .map { (videoUrl, entries) ->
                     if (entries.size > 1) {
@@ -1563,84 +1611,59 @@ class FirebaseManager {
         }
     }
     
+    // Limpiar videos de usuarios que ya no existen (huérfanos)
+    suspend fun cleanupOrphanedVideos(): Int {
+        return try {
+            android.util.Log.d("FirebaseManager", "🧹 Iniciando limpieza de videos huérfanos...")
+            
+            val snapshot = firestore.collection("contest_entries").get().await()
+            var deletedCount = 0
+            
+            snapshot.documents.forEach { doc ->
+                val userId = doc.getString("userId") ?: ""
+                val username = doc.getString("username") ?: "Desconocido"
+                
+                if (userId.isEmpty()) {
+                    android.util.Log.w("FirebaseManager", "⚠️ Video sin userId: ${doc.id}")
+                    return@forEach
+                }
+                
+                // Verificar si el usuario existe
+                val userExists = try {
+                    val userDoc = firestore.collection("users").document(userId).get().await()
+                    userDoc.exists()
+                } catch (e: Exception) {
+                    android.util.Log.e("FirebaseManager", "❌ Error verificando usuario $userId: ${e.message}")
+                    true // En caso de error, no eliminar
+                }
+                
+                if (!userExists) {
+                    try {
+                        firestore.collection("contest_entries").document(doc.id).delete().await()
+                        deletedCount++
+                        android.util.Log.d("FirebaseManager", "🗑️ Video huérfano eliminado: $username (userId: $userId)")
+                    } catch (e: Exception) {
+                        android.util.Log.e("FirebaseManager", "❌ Error eliminando video ${doc.id}: ${e.message}")
+                    }
+                }
+            }
+            
+            android.util.Log.d("FirebaseManager", "✅ Limpieza completada: $deletedCount videos huérfanos eliminados")
+            deletedCount
+        } catch (e: Exception) {
+            android.util.Log.e("FirebaseManager", "❌ Error en limpieza de videos huérfanos: ${e.message}", e)
+            0
+        }
+    }
+    
     // ============================================
     // ELIMINAR CUENTA DE USUARIO
     // ============================================
     
     // Eliminar todos los datos del usuario de Firebase
+    // Esta función ahora llama a deleteAllUserData que es más completa
     suspend fun deleteUserAccount(userId: String) {
-        try {
-            android.util.Log.d("FirebaseManager", "🗑️ Eliminando cuenta del usuario: $userId")
-            
-            // 1. Eliminar perfil del usuario
-            firestore.collection("users").document(userId).delete().await()
-            android.util.Log.d("FirebaseManager", "✅ Perfil eliminado")
-            
-            // 2. Eliminar canciones del usuario
-            val songsSnapshot = firestore.collection("songs")
-                .whereEqualTo("userId", userId)
-                .get()
-                .await()
-            for (doc in songsSnapshot.documents) {
-                doc.reference.delete().await()
-            }
-            android.util.Log.d("FirebaseManager", "✅ ${songsSnapshot.size()} canciones eliminadas")
-            
-            // 3. Eliminar historias del usuario
-            val storiesSnapshot = firestore.collection("stories")
-                .whereEqualTo("artistId", userId)
-                .get()
-                .await()
-            for (doc in storiesSnapshot.documents) {
-                doc.reference.delete().await()
-            }
-            android.util.Log.d("FirebaseManager", "✅ ${storiesSnapshot.size()} historias eliminadas")
-            
-            // 4. Eliminar entradas de concursos
-            val contestsSnapshot = firestore.collection("contest_entries")
-                .whereEqualTo("userId", userId)
-                .get()
-                .await()
-            for (doc in contestsSnapshot.documents) {
-                doc.reference.delete().await()
-            }
-            android.util.Log.d("FirebaseManager", "✅ ${contestsSnapshot.size()} entradas de concursos eliminadas")
-            
-            // 5. Eliminar likes del usuario
-            val likesSnapshot = firestore.collection("song_likes")
-                .whereEqualTo("userId", userId)
-                .get()
-                .await()
-            for (doc in likesSnapshot.documents) {
-                doc.reference.delete().await()
-            }
-            android.util.Log.d("FirebaseManager", "✅ ${likesSnapshot.size()} likes eliminados")
-            
-            // 6. Eliminar seguidores y seguidos
-            val followingSnapshot = firestore.collection("users")
-                .document(userId)
-                .collection("following")
-                .get()
-                .await()
-            for (doc in followingSnapshot.documents) {
-                doc.reference.delete().await()
-            }
-            
-            val followersSnapshot = firestore.collection("users")
-                .document(userId)
-                .collection("followers")
-                .get()
-                .await()
-            for (doc in followersSnapshot.documents) {
-                doc.reference.delete().await()
-            }
-            android.util.Log.d("FirebaseManager", "✅ Seguidores y seguidos eliminados")
-            
-            android.util.Log.d("FirebaseManager", "✅ Cuenta eliminada completamente")
-        } catch (e: Exception) {
-            android.util.Log.e("FirebaseManager", "❌ Error eliminando cuenta: ${e.message}", e)
-            throw Exception("Error al eliminar cuenta: ${e.message}")
-        }
+        deleteAllUserData(userId)
     }
 
     // Generar imagen de portada automática usando plantilla
@@ -2519,6 +2542,270 @@ class FirebaseManager {
         } catch (e: Exception) {
             android.util.Log.e("FirebaseManager", "❌ Error obteniendo canciones de following: ${e.message}")
             emptyList()
+        }
+    }
+    
+    // ============ VERIFICACIÓN DE PERFIL COMPLETO ============
+    
+    /**
+     * Verifica si un usuario tiene un perfil completo en Firestore.
+     * Los usuarios que solo se autentican con Google sin crear perfil NO pueden participar en concursos.
+     * 
+     * @param userId ID del usuario a verificar
+     * @return true si el usuario tiene perfil completo (documento existe y tiene username), false en caso contrario
+     */
+    suspend fun hasCompleteProfile(userId: String): Boolean {
+        return try {
+            if (userId.isEmpty()) {
+                android.util.Log.w("FirebaseManager", "⚠️ userId vacío, perfil incompleto")
+                return false
+            }
+            
+            val doc = firestore.collection("users")
+                .document(userId)
+                .get()
+                .await()
+            
+            // Verificar que el documento existe
+            if (!doc.exists()) {
+                android.util.Log.w("FirebaseManager", "⚠️ Usuario $userId no tiene documento en Firestore")
+                return false
+            }
+            
+            // Verificar que tiene username configurado
+            val username = doc.getString("username")
+            val hasUsername = !username.isNullOrEmpty()
+            
+            if (!hasUsername) {
+                android.util.Log.w("FirebaseManager", "⚠️ Usuario $userId no tiene username configurado")
+                return false
+            }
+            
+            android.util.Log.d("FirebaseManager", "✅ Usuario $userId tiene perfil completo (username: $username)")
+            true
+            
+        } catch (e: Exception) {
+            android.util.Log.e("FirebaseManager", "❌ Error verificando perfil de $userId: ${e.message}")
+            false
+        }
+    }
+    
+    // ============ ELIMINACIÓN COMPLETA DE DATOS DEL USUARIO ============
+    
+    /**
+     * Elimina TODOS los datos del usuario de Firebase (Firestore y Storage).
+     * Esto incluye:
+     * - Documento del usuario en /users/{userId}
+     * - Subcolecciones: rejectedSongs, viewedStories, following, followers
+     * - Canciones subidas por el usuario
+     * - Historias del usuario
+     * - Videos de concursos del usuario
+     * - Comentarios del usuario
+     * - Likes del usuario
+     * - Archivos en Storage (fotos de perfil, portada, galería, etc.)
+     * 
+     * @param userId ID del usuario a eliminar
+     */
+    suspend fun deleteAllUserData(userId: String) {
+        try {
+            android.util.Log.d("FirebaseManager", "🗑️ ===== INICIANDO ELIMINACIÓN COMPLETA DE DATOS =====")
+            android.util.Log.d("FirebaseManager", "👤 Usuario: $userId")
+            
+            // 1. Eliminar subcolección: rejectedSongs
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando canciones rechazadas...")
+            val rejectedSongs = firestore.collection("users")
+                .document(userId)
+                .collection("rejectedSongs")
+                .get()
+                .await()
+            rejectedSongs.documents.forEach { it.reference.delete().await() }
+            android.util.Log.d("FirebaseManager", "✅ ${rejectedSongs.size()} canciones rechazadas eliminadas")
+            
+            // 2. Eliminar subcolección: viewedStories
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando historias vistas...")
+            val viewedStories = firestore.collection("users")
+                .document(userId)
+                .collection("viewedStories")
+                .get()
+                .await()
+            viewedStories.documents.forEach { it.reference.delete().await() }
+            android.util.Log.d("FirebaseManager", "✅ ${viewedStories.size()} historias vistas eliminadas")
+            
+            // 3. Eliminar subcolección: following
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando lista de seguidos...")
+            val following = firestore.collection("users")
+                .document(userId)
+                .collection("following")
+                .get()
+                .await()
+            following.documents.forEach { 
+                val targetUserId = it.id
+                // Eliminar el documento de following
+                it.reference.delete().await()
+                // Decrementar contador de followers del usuario seguido
+                try {
+                    firestore.collection("users").document(targetUserId)
+                        .update("followers", com.google.firebase.firestore.FieldValue.increment(-1))
+                        .await()
+                    // Eliminar de la colección de followers del target
+                    firestore.collection("users")
+                        .document(targetUserId)
+                        .collection("followers")
+                        .document(userId)
+                        .delete()
+                        .await()
+                } catch (e: Exception) {
+                    android.util.Log.w("FirebaseManager", "No se pudo actualizar followers de $targetUserId")
+                }
+            }
+            android.util.Log.d("FirebaseManager", "✅ ${following.size()} seguidos eliminados")
+            
+            // 4. Eliminar subcolección: followers
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando lista de seguidores...")
+            val followers = firestore.collection("users")
+                .document(userId)
+                .collection("followers")
+                .get()
+                .await()
+            followers.documents.forEach { 
+                val followerUserId = it.id
+                // Eliminar el documento de followers
+                it.reference.delete().await()
+                // Decrementar contador de following del seguidor
+                try {
+                    firestore.collection("users").document(followerUserId)
+                        .update("following", com.google.firebase.firestore.FieldValue.increment(-1))
+                        .await()
+                    // Eliminar de la colección de following del follower
+                    firestore.collection("users")
+                        .document(followerUserId)
+                        .collection("following")
+                        .document(userId)
+                        .delete()
+                        .await()
+                } catch (e: Exception) {
+                    android.util.Log.w("FirebaseManager", "No se pudo actualizar following de $followerUserId")
+                }
+            }
+            android.util.Log.d("FirebaseManager", "✅ ${followers.size()} seguidores eliminados")
+            
+            // 5. Eliminar canciones del usuario
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando canciones...")
+            val songs = firestore.collection("songs")
+                .whereEqualTo("artistId", userId)
+                .get()
+                .await()
+            songs.documents.forEach { it.reference.delete().await() }
+            android.util.Log.d("FirebaseManager", "✅ ${songs.size()} canciones eliminadas")
+            
+            // 6. Eliminar historias del usuario
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando historias...")
+            val stories = firestore.collection("stories")
+                .whereEqualTo("artistId", userId)
+                .get()
+                .await()
+            stories.documents.forEach { it.reference.delete().await() }
+            android.util.Log.d("FirebaseManager", "✅ ${stories.size()} historias eliminadas")
+            
+            // 7. Eliminar videos de concursos del usuario
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando videos de concursos...")
+            val contestEntries = firestore.collection("contest_entries")
+                .whereEqualTo("userId", userId)
+                .get()
+                .await()
+            contestEntries.documents.forEach { it.reference.delete().await() }
+            android.util.Log.d("FirebaseManager", "✅ ${contestEntries.size()} videos de concursos eliminados")
+            
+            // 8. Eliminar comentarios del usuario en todas las canciones
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando comentarios...")
+            val allSongs = firestore.collection("songs").get().await()
+            var commentsDeleted = 0
+            allSongs.documents.forEach { songDoc ->
+                val comments = songDoc.reference.collection("comments")
+                    .whereEqualTo("userId", userId)
+                    .get()
+                    .await()
+                comments.documents.forEach { 
+                    it.reference.delete().await()
+                    commentsDeleted++
+                }
+            }
+            android.util.Log.d("FirebaseManager", "✅ $commentsDeleted comentarios eliminados")
+            
+            // 9. Eliminar likes del usuario en canciones
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando likes de canciones...")
+            var likesDeleted = 0
+            allSongs.documents.forEach { songDoc ->
+                val like = songDoc.reference.collection("likes")
+                    .document(userId)
+                    .get()
+                    .await()
+                if (like.exists()) {
+                    like.reference.delete().await()
+                    // Decrementar contador de likes
+                    songDoc.reference.update("likes", com.google.firebase.firestore.FieldValue.increment(-1)).await()
+                    likesDeleted++
+                }
+            }
+            android.util.Log.d("FirebaseManager", "✅ $likesDeleted likes de canciones eliminados")
+            
+            // 10. Eliminar likes del usuario en videos de concursos
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando likes de videos...")
+            val allContestEntries = firestore.collection("contest_entries").get().await()
+            var videoLikesDeleted = 0
+            allContestEntries.documents.forEach { entryDoc ->
+                val like = entryDoc.reference.collection("likes")
+                    .document(userId)
+                    .get()
+                    .await()
+                if (like.exists()) {
+                    like.reference.delete().await()
+                    // Decrementar contador de likes
+                    entryDoc.reference.update("likes", com.google.firebase.firestore.FieldValue.increment(-1)).await()
+                    videoLikesDeleted++
+                }
+            }
+            android.util.Log.d("FirebaseManager", "✅ $videoLikesDeleted likes de videos eliminados")
+            
+            // 11. Eliminar documento principal del usuario
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando documento principal del usuario...")
+            firestore.collection("users").document(userId).delete().await()
+            android.util.Log.d("FirebaseManager", "✅ Documento principal eliminado")
+            
+            // 12. Eliminar archivos de Storage (opcional, puede tardar)
+            android.util.Log.d("FirebaseManager", "🗑️ Eliminando archivos de Storage...")
+            try {
+                // Eliminar foto de perfil
+                storage.reference.child("profile_images/$userId.jpg").delete().await()
+            } catch (e: Exception) {
+                android.util.Log.w("FirebaseManager", "No se pudo eliminar foto de perfil")
+            }
+            try {
+                // Eliminar foto de portada
+                storage.reference.child("cover_images/$userId.jpg").delete().await()
+            } catch (e: Exception) {
+                android.util.Log.w("FirebaseManager", "No se pudo eliminar foto de portada")
+            }
+            try {
+                // Eliminar carpeta de galería
+                val galleryPhotos = storage.reference.child("gallery_photos/$userId").listAll().await()
+                galleryPhotos.items.forEach { it.delete().await() }
+            } catch (e: Exception) {
+                android.util.Log.w("FirebaseManager", "No se pudo eliminar galería de fotos")
+            }
+            try {
+                // Eliminar carpeta de videos de galería
+                val galleryVideos = storage.reference.child("gallery_videos/$userId").listAll().await()
+                galleryVideos.items.forEach { it.delete().await() }
+            } catch (e: Exception) {
+                android.util.Log.w("FirebaseManager", "No se pudo eliminar galería de videos")
+            }
+            
+            android.util.Log.d("FirebaseManager", "✅ ===== ELIMINACIÓN COMPLETA FINALIZADA =====")
+            
+        } catch (e: Exception) {
+            android.util.Log.e("FirebaseManager", "❌ Error eliminando datos del usuario: ${e.message}", e)
+            throw Exception("Error al eliminar datos del usuario: ${e.message}")
         }
     }
 }

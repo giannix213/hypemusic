@@ -64,6 +64,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 
 // ============ SISTEMA DE CACHÉ PARA VIDEOS ============
 
@@ -113,6 +115,67 @@ object ExoPlayerCache {
     }
 }
 
+// ============ SLOT PLAYER POOL - SOLUCIÓN ESTABLE ============
+object SlotPlayerPool {
+    private const val SLOTS = 3
+    private val slotPlayers = Array<ExoPlayer?>(SLOTS) { null }
+    private val slotPage = IntArray(SLOTS) { -1 } // qué página está usando cada slot
+    
+    // obtener slot para una página (reutiliza si ya asignado, si no asigna el slot menos usado)
+    fun getSlotForPage(context: Context, page: Int, url: String): Pair<Int, ExoPlayer> {
+        // si ya hay un slot asignado para esta página
+        val existingIndex = slotPage.indexOf(page)
+        if (existingIndex >= 0) return existingIndex to slotPlayers[existingIndex]!!
+        
+        // buscar slot vacío
+        val emptyIndex = slotPlayers.indexOfFirst { it == null }
+        if (emptyIndex >= 0) {
+            val p = ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(url))
+                prepare()
+                playWhenReady = false
+            }
+            slotPlayers[emptyIndex] = p
+            slotPage[emptyIndex] = page
+            return emptyIndex to p
+        }
+        
+        // si no hay vacío, reutilizar slot con página más lejana del 'page' objetivo
+        val distances = slotPage.map { kotlin.math.abs(it - page) }
+        val reuseIndex = distances.indices.maxByOrNull { distances[it] } ?: 0
+        
+        // release antiguo player y reemplazar
+        slotPlayers[reuseIndex]?.release()
+        val newPlayer = ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(url))
+            prepare()
+            playWhenReady = false
+        }
+        slotPlayers[reuseIndex] = newPlayer
+        slotPage[reuseIndex] = page
+        return reuseIndex to newPlayer
+    }
+    
+    // Preload de un page (prepara media en background usando player temporal)
+    fun preload(context: Context, page: Int, url: String) {
+        // simple: crear player temporal y liberar (pre-warm caches)
+        val tmp = ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(url))
+            prepare()
+            playWhenReady = false
+        }
+        tmp.release()
+    }
+    
+    fun releaseAll() {
+        slotPlayers.forEach { it?.release() }
+        for (i in slotPlayers.indices) {
+            slotPlayers[i] = null
+            slotPage[i] = -1
+        }
+    }
+}
+
 // NUEVA PANTALLA DE LIVES - CARRUSEL DE VIDEOS DE CONCURSOS
 @Composable
 fun LiveScreenNew(
@@ -148,6 +211,37 @@ fun LiveScreenNew(
     // Videos de concursos - CARGADOS DESDE FIREBASE
     var contestVideos by remember { mutableStateOf<List<ContestEntry>>(emptyList()) }
     var isLoadingVideos by remember { mutableStateOf(true) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    
+    // Función para recargar videos
+    suspend fun refreshVideos() {
+        try {
+            android.util.Log.d("LiveScreen", "🔄 Refrescando videos...")
+            
+            // Delay mínimo para que se vea el indicador de carga
+            kotlinx.coroutines.delay(800)
+            
+            val previousCount = contestVideos.size
+            contestVideos = firebaseManager.getAllContestEntries()
+            currentVideoIndex = 0
+            
+            android.util.Log.d("LiveScreen", "✅ Videos refrescados: ${contestVideos.size}")
+            
+            // Mostrar Toast con feedback
+            android.widget.Toast.makeText(
+                context,
+                "✓ ${contestVideos.size} videos actualizados",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        } catch (e: Exception) {
+            android.util.Log.e("LiveScreen", "❌ Error refrescando: ${e.message}")
+            android.widget.Toast.makeText(
+                context,
+                "Error al actualizar videos",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
     
     // Cargar videos de concursos desde Firebase
     LaunchedEffect(Unit) {
@@ -195,32 +289,30 @@ fun LiveScreenNew(
     }
     val liveSessionsFlow by liveListViewModel.liveSessions.collectAsState()
     
-    // Variable para mostrar debug en pantalla
-    var debugInfo by remember { mutableStateOf("Inicializando...") }
-    
     // Convertir LiveSession a LiveStream para compatibilidad con el código existente
+    // FILTRAR SOLO LIVES ACTIVOS (isActive = true)
     val activeLives = remember(liveSessionsFlow) {
         android.util.Log.d("LiveScreen", "🔄 ACTUALIZANDO LISTA DE LIVES: ${liveSessionsFlow.size}")
-        debugInfo = "Lives encontrados: ${liveSessionsFlow.size}\n" +
-                    "Última actualización: ${System.currentTimeMillis()}"
         
         liveSessionsFlow.forEach { session ->
             android.util.Log.d("LiveScreen", "  📡 ${session.username} - isActive: ${session.isActive}")
-            debugInfo += "\n- ${session.username} (${if (session.isActive) "ACTIVO" else "INACTIVO"})"
         }
         
-        liveSessionsFlow.map { session ->
-            LiveStream(
-                id = session.sessionId,
-                name = "${session.username} en Vivo 🔴",
-                artistName = session.username,
-                location = session.title,
-                emoji = "🎤",
-                viewers = session.viewerCount,
-                isLive = session.isActive,
-                startTime = session.startTime
-            )
-        }
+        // FILTRAR: Solo mostrar lives que están actualmente activos
+        liveSessionsFlow
+            .filter { session -> session.isActive }  // ✅ FILTRO AGREGADO
+            .map { session ->
+                LiveStream(
+                    id = session.sessionId,
+                    name = "${session.username} en Vivo 🔴",
+                    artistName = session.username,
+                    location = session.title,
+                    emoji = "🎤",
+                    viewers = session.viewerCount,
+                    isLive = session.isActive,
+                    startTime = session.startTime
+                )
+            }
     }
     
     // Log cuando cambia la lista de Lives
@@ -230,9 +322,6 @@ fun LiveScreenNew(
             android.util.Log.d("LiveScreen", "  📡 ${live.artistName} - ${live.viewers} espectadores")
         }
     }
-    
-    // MOSTRAR DEBUG EN PANTALLA (temporal para diagnóstico)
-    var showDebugOverlay by remember { mutableStateOf(true) }
     
     val lives = remember {
         listOf(
@@ -477,9 +566,10 @@ fun LiveScreenNew(
         }
         showCatalog -> {
             android.util.Log.d("LiveScreen", "📋 Mostrando catálogo de Lives y Concursos")
+            android.util.Log.d("LiveScreen", "   Lives activos en Firebase: ${activeLives.size}")
             // Pantalla de catálogo (Lives y Concursos)
             LiveCatalogScreen(
-                lives = lives,
+                lives = activeLives,  // USAR LIVES REALES DE FIREBASE
                 fastContests = fastContests,
                 highImpactContests = highImpactContests,
                 colors = colors,
@@ -528,16 +618,37 @@ fun LiveScreenNew(
                     }
                 }
             } else {
-                ContestVideoCarouselScreen(
-                    videos = contestVideos,
-                    colors = colors,
-                    currentIndex = currentVideoIndex,
-                    onIndexChange = { currentVideoIndex = it },
-                    onSwipeLeft = { showCatalog = true },
-                    onSwipeRight = { onMenuClick() },
-                    onStartLive = { showLiveStreams = true },
-                    onNavigateToProfile = onNavigateToProfile
-                )
+                // SwipeRefresh solo habilitado cuando estamos en el primer video
+                val swipeRefreshState = rememberSwipeRefreshState(isRefreshing = isRefreshing)
+                
+                SwipeRefresh(
+                    state = swipeRefreshState,
+                    onRefresh = {
+                        // Solo permitir refresh si estamos en el primer video
+                        if (currentVideoIndex == 0) {
+                            scope.launch {
+                                isRefreshing = true
+                                refreshVideos()
+                                isRefreshing = false
+                            }
+                        }
+                    },
+                    // Deshabilitar el indicador si no estamos en el primer video
+                    swipeEnabled = currentVideoIndex == 0,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    ContestVideoCarouselScreen(
+                        videos = contestVideos,
+                        colors = colors,
+                        currentIndex = currentVideoIndex,
+                        onIndexChange = { currentVideoIndex = it },
+                        onSwipeLeft = { showCatalog = true },
+                        onSwipeRight = { onMenuClick() },
+                        onStartLive = { showLiveStreams = true },
+                        onNavigateToProfile = onNavigateToProfile,
+                        isRefreshing = isRefreshing
+                    )
+                }
             }
         }
     }
@@ -632,49 +743,6 @@ fun LiveScreenNew(
         )
     }
     
-    // OVERLAY DE DEBUG (temporal - mostrar info en pantalla)
-    if (showDebugOverlay && !showBroadcasterScreen && !showViewerScreen && !showLiveLauncher) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            contentAlignment = Alignment.BottomStart
-        ) {
-            Surface(
-                color = Color.Black.copy(alpha = 0.8f),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "🔍 DEBUG INFO",
-                            color = PopArtColors.Yellow,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                        TextButton(
-                            onClick = { showDebugOverlay = false }
-                        ) {
-                            Text("Cerrar", color = Color.White, fontSize = 10.sp)
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        debugInfo,
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp
-                    )
-                }
-            }
-        }
-    }
 }
 
 // ============ REPRODUCTOR DE VIDEO CON EXOPLAYER ============
@@ -848,23 +916,30 @@ fun ContestVideoCarouselScreen(
     onSwipeLeft: () -> Unit,
     onSwipeRight: () -> Unit,
     onStartLive: () -> Unit,
-    onNavigateToProfile: (String) -> Unit = {}
+    onNavigateToProfile: (String) -> Unit = {},
+    isRefreshing: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val firebaseManager = remember { FirebaseManager() }
     val authManager = remember { AuthManager(context) }
     
-    // Obtener el CacheDataSourceFactory (se inicializa una vez)
-    val cacheDataSourceFactory = remember {
-        ExoPlayerCache.getCacheDataSourceFactory(context)
-    }
-    
     // Estado del Pager para desplazamiento vertical fluido
     val pagerState = rememberPagerState(
         initialPage = currentIndex,
         pageCount = { videos.size }
     )
+    
+    // 🔥 VENTANA MÓVIL DE PLAYERS - SlotPlayerPool con preload
+    val currentPage = pagerState.currentPage
+    
+    LaunchedEffect(pagerState.currentPage) {
+        val i = pagerState.currentPage
+        // preload siguiente y previo
+        if (i + 1 < videos.size) SlotPlayerPool.preload(context, i + 1, videos[i + 1].videoUrl)
+        if (i - 1 >= 0) SlotPlayerPool.preload(context, i - 1, videos[i - 1].videoUrl)
+        // NO liberamos aquí slots; pool se encarga de reciclar cuando sea necesario
+    }
     
     // Estado para controlar pausa/reproducción
     var isPaused by remember { mutableStateOf(false) }
@@ -933,49 +1008,26 @@ fun ContestVideoCarouselScreen(
         }
     }
     
-    // Pool de reproductores para precarga
-    val playerMap = remember { mutableMapOf<Int, ExoPlayer>() }
-    
-    // Función para obtener o crear un ExoPlayer CON CACHÉ
-    val getPlayer: (Int) -> ExoPlayer = remember(cacheDataSourceFactory) {
-        { index ->
-            playerMap.getOrPut(index) {
-                android.util.Log.d("PlayerPool", "✨ Creando Player con caché para índice $index")
-                ExoPlayer.Builder(context)
-                    .setMediaSourceFactory(
-                        androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
-                            // CRUCIAL: Usar el caché como fuente de datos principal
-                            .setDataSourceFactory(cacheDataSourceFactory)
-                    )
-                    .build()
-                    .apply {
-                        // CRUCIAL: Silenciar el reproductor al crearlo
-                        volume = 0f
-                        // CRUCIAL: Preparar el reproductor inmediatamente
-                        prepare()
-                    }
-            }
-        }
-    }
-    
     // Lifecycle observer para pausar cuando la app va a segundo plano
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    // Pausar todos los reproductores cuando la app va a segundo plano
-                    android.util.Log.d("LiveCarousel", "⏸️ App en segundo plano - Pausando videos")
-                    playerMap.values.forEach { player ->
+                    android.util.Log.d("LiveCarousel", "⏸️ App en segundo plano - Pausando todos los videos")
+                    isPaused = true
+                    // Pausar el player actual
+                    if (currentPage < videos.size) {
+                        val (_, player) = SlotPlayerPool.getSlotForPage(context, currentPage, videos[currentPage].videoUrl)
                         player.playWhenReady = false
                     }
-                    isPaused = true
                 }
                 Lifecycle.Event.ON_RESUME -> {
-                    // Reanudar solo el video actual cuando la app vuelve
                     android.util.Log.d("LiveCarousel", "▶️ App en primer plano - Reanudando video actual")
-                    val currentPlayer = playerMap[pagerState.currentPage]
-                    currentPlayer?.playWhenReady = !isPaused
+                    if (!isPaused && currentPage < videos.size) {
+                        val (_, player) = SlotPlayerPool.getSlotForPage(context, currentPage, videos[currentPage].videoUrl)
+                        player.playWhenReady = true
+                    }
                 }
                 else -> {}
             }
@@ -988,70 +1040,18 @@ fun ContestVideoCarouselScreen(
         }
     }
     
-    // Detectar cambio de página y notificar al padre
-    LaunchedEffect(pagerState.currentPage) {
-        isPaused = false
-        onIndexChange(pagerState.currentPage)
-        android.util.Log.d("LiveCarousel", "📹 Pager cambió a video: ${pagerState.currentPage}")
-    }
-    
-    // ============ REEMPLAZAR ESTE BLOQUE COMPLETO ============
-    // Pool de reproductores: Inicialización y liberación de recursos
-    val currentPage = pagerState.currentPage
-    DisposableEffect(context, videos, currentPage) {
-        android.util.Log.d("PlayerPool", "🔄 DisposedEffect activado. Página actual: $currentPage")
+    // 🔥 LIBERAR TODOS LOS SLOTS AL SALIR
+    DisposableEffect(Unit) {
+        android.util.Log.d("LiveCarousel", "✨ Carrusel iniciado con SlotPlayerPool")
         
-        // --- Lógica de PRECARGA y PREPARACIÓN ---
-        val prefetchRange = 3 // Precarga los siguientes 3 videos para máxima fluidez
-        val totalVideos = videos.size
-        val pagesToPreload = (currentPage + 1..currentPage + prefetchRange)
-            .filter { it < totalVideos }
-        
-        // Paso 1: Precargar y preparar los reproductores de los videos siguientes
-        pagesToPreload.forEach { index ->
-            val videoEntry = videos[index]
-            if (videoEntry.videoUrl.isNotEmpty()) {
-                val player = getPlayer(index)
-                val mediaItem = MediaItem.fromUri(videoEntry.videoUrl)
-                
-                // CRUCIAL: Solo preparar si aún no está en un estado listo.
-                // Si el Player no tiene un MediaItem cargado, establecerlo y prepararlo.
-                val currentMediaItem = player.currentMediaItem?.localConfiguration?.uri?.toString()
-                if (currentMediaItem != videoEntry.videoUrl || player.playbackState == Player.STATE_IDLE) {
-                    android.util.Log.d("PlayerPool", "🚀 Preparando video precargado para índice $index: ${videoEntry.videoUrl.take(20)}...")
-                    
-                    // Usamos seekTo(0) para asegurar que empiece desde el inicio
-                    player.setMediaItem(mediaItem, 0)
-                    player.prepare()
-                    
-                    // CRUCIAL: Le decimos al reproductor que esté listo para reproducir (aunque esté pausado por el VideoPlayerWithLoader)
-                    player.playWhenReady = true
-                    player.volume = 0f // Silenciar para la precarga, solo reproducirá con volumen al activarse
-                }
-            }
-        }
-        
-        // --- Lógica de LIBERACIÓN (Limpieza) ---
-        val pagesToKeep = (currentPage - 1..currentPage + prefetchRange).toSet()
-        val playersToRemove = playerMap.keys
-            .filter { it !in pagesToKeep }
-            .toList() // Hacer una copia para evitar errores de concurrencia al modificar playerMap
-        
-        playersToRemove.forEach { index ->
-            playerMap.remove(index)?.release()
-            android.util.Log.d("PlayerPool", "🗑️ Liberando Player para índice $index")
-        }
-        
-        // --- LIMPIEZA FINAL ---
         onDispose {
-            android.util.Log.d("PlayerPool", "🧹 Limpieza de recursos al salir del Composable")
-            // No liberar la caché aquí si la aplicación sigue viva
-            playerMap.values.forEach { it.release() }
-            playerMap.clear()
-            ExoPlayerCache.release() // Llamar a la liberación de caché al final de la pantalla principal
+            android.util.Log.d("LiveCarousel", "🧹 Liberando todos los slots del pool")
+            try {
+                SlotPlayerPool.releaseAll()
+            } catch (_: Exception) {}
+            ExoPlayerCache.release()
         }
     }
-    // ============ FIN DEL BLOQUE DE REEMPLAZO ============
     
     // Estados para gestos y animaciones
     var showLikeAnimation by remember { mutableStateOf(false) }
@@ -1063,14 +1063,22 @@ fun ContestVideoCarouselScreen(
             .fillMaxSize()
             .background(Color.Black)
             .pointerInput(Unit) {
-                // Detectar swipe horizontal para catálogo/configuración
-                detectHorizontalDragGestures { _, dragAmount ->
-                    if (dragAmount < -100) {
-                        onSwipeLeft()
-                    } else if (dragAmount > 100) {
-                        onSwipeRight()
+                // Detectar swipe horizontal REFORZADO - Umbral reducido para mayor sensibilidad
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        // Detectar al soltar el dedo
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        // Detectar mientras arrastra - Umbral más bajo (50 en lugar de 100)
+                        if (dragAmount < -50) {
+                            android.util.Log.d("LiveCarousel", "⬅️ Swipe izquierda - Abriendo catálogo")
+                            onSwipeLeft()
+                        } else if (dragAmount > 50) {
+                            android.util.Log.d("LiveCarousel", "➡️ Swipe derecha - Abriendo menú")
+                            onSwipeRight()
+                        }
                     }
-                }
+                )
             }
             .pointerInput(Unit) {
                 // Detectar gestos: tap, doble tap, long press
@@ -1078,8 +1086,8 @@ fun ContestVideoCarouselScreen(
                     onTap = { offset ->
                         // Tap simple: pausar/reanudar
                         isPaused = !isPaused
-                        val currentPlayer = playerMap[pagerState.currentPage]
-                        currentPlayer?.playWhenReady = !isPaused
+                        val (_, currentPlayer) = SlotPlayerPool.getSlotForPage(context, pagerState.currentPage, videos[pagerState.currentPage].videoUrl)
+                        currentPlayer.playWhenReady = !isPaused
                         android.util.Log.d("LiveCarousel", "⏯️ Tap: Pausa -> $isPaused")
                     },
                     onDoubleTap = { offset ->
@@ -1108,8 +1116,8 @@ fun ContestVideoCarouselScreen(
                         // Long press: pausar mientras se mantiene presionado
                         isLongPressing = true
                         isPaused = true
-                        val currentPlayer = playerMap[pagerState.currentPage]
-                        currentPlayer?.playWhenReady = false
+                        val (_, currentPlayer) = SlotPlayerPool.getSlotForPage(context, pagerState.currentPage, videos[pagerState.currentPage].videoUrl)
+                        currentPlayer.playWhenReady = false
                         android.util.Log.d("LiveCarousel", "⏸️ Long press: Video pausado")
                     },
                     onPress = {
@@ -1118,8 +1126,8 @@ fun ContestVideoCarouselScreen(
                         if (isLongPressing) {
                             isLongPressing = false
                             isPaused = false
-                            val currentPlayer = playerMap[pagerState.currentPage]
-                            currentPlayer?.playWhenReady = true
+                            val (_, currentPlayer) = SlotPlayerPool.getSlotForPage(context, pagerState.currentPage, videos[pagerState.currentPage].videoUrl)
+                            currentPlayer.playWhenReady = true
                             android.util.Log.d("LiveCarousel", "▶️ Long press released: Video reanudado")
                         }
                     }
@@ -1202,30 +1210,61 @@ fun ContestVideoCarouselScreen(
         }
         
         if (videos.isEmpty()) {
-            // Sin videos de concursos
-            Column(
+            // Sin videos de concursos - CON SWIPE REFORZADO
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(40.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .pointerInput(Unit) {
+                        // Detector de swipe horizontal REFORZADO
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                // Detectar al soltar el dedo
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                // Detectar mientras arrastra
+                                if (dragAmount < -50) { // Umbral más bajo para mayor sensibilidad
+                                    android.util.Log.d("LiveCarousel", "⬅️ Swipe izquierda detectado - Abriendo catálogo")
+                                    onSwipeLeft()
+                                } else if (dragAmount > 50) {
+                                    android.util.Log.d("LiveCarousel", "➡️ Swipe derecha detectado - Abriendo menú")
+                                    onSwipeRight()
+                                }
+                            }
+                        )
+                    }
             ) {
-                Text("🎬", fontSize = 120.sp)
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "No hay videos de concursos aún",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Sé el primero en participar",
-                    fontSize = 16.sp,
-                    color = Color.White.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(40.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("🎬", fontSize = 120.sp)
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "No hay videos de concursos aún",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Sé el primero en participar",
+                        fontSize = 16.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(32.dp))
+                    Text(
+                        "← Desliza para ver concursos",
+                        fontSize = 14.sp,
+                        color = Color.White.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         } else {
             // VerticalPager para swipe fluido con inercia y animaciones
@@ -1257,21 +1296,62 @@ fun ContestVideoCarouselScreen(
                             this.translationY = pageOffset * 50f
                         }
                 ) {
-                    // 🎬 REPRODUCTOR DE VIDEO con Player Pool y Loader
+                    // 🎬 REPRODUCTOR DE VIDEO - Usar SlotPlayerPool con update callback
                     if (currentVideo.videoUrl.isNotEmpty()) {
-                        VideoPlayerWithLoader(
-                            player = getPlayer(page),
-                            videoUrl = currentVideo.videoUrl,
-                            isPaused = isPaused,
-                            isCurrentPage = page == pagerState.currentPage,
-                            onVideoEnded = {
-                                // Solo avanzar si este es el video actual
-                                if (page == pagerState.currentPage) {
-                                    advanceToNextVideo()
+                        // obtener slot/player asignado para esta página (no crea players sin control)
+                        val (slotIdx, pagePlayer) = remember(page) {
+                            SlotPlayerPool.getSlotForPage(context, page, currentVideo.videoUrl)
+                        }
+                        
+                        // Control de reproducción: solo reproducir si es página actual y no pausado
+                        LaunchedEffect(pagerState.currentPage, isPaused, page) {
+                            val isCurrent = page == pagerState.currentPage
+                            try {
+                                pagePlayer.playWhenReady = isCurrent && !isPaused
+                                if (isCurrent) {
+                                    // opcional: asegurarnos de que esté al inicio
+                                    pagePlayer.seekToDefaultPosition()
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        
+                        // Listener para detectar fin de video y avanzar automáticamente
+                        DisposableEffect(pagePlayer, page) {
+                            val listener = object : Player.Listener {
+                                override fun onPlaybackStateChanged(playbackState: Int) {
+                                    if (playbackState == Player.STATE_ENDED && page == pagerState.currentPage) {
+                                        // Auto-avanzar inmediatamente al siguiente video (estilo TikTok)
+                                        android.util.Log.d("LiveCarousel", "🏁 Video terminado, avanzando automáticamente")
+                                        scope.launch {
+                                            advanceToNextVideo()
+                                        }
+                                    }
                                 }
                             }
+                            pagePlayer.addListener(listener)
+                            onDispose {
+                                pagePlayer.removeListener(listener)
+                            }
+                        }
+                        
+                        // PlayerView: asignar el player en update{} para evitar race conditions de surface
+                        AndroidView(
+                            factory = { ctx ->
+                                PlayerView(ctx).apply {
+                                    useController = false
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    // NOTA: no asignamos 'player' aquí; lo hacemos en update para evitar detach/attach race
+                                }
+                            },
+                            update = { pv ->
+                                // Asigna el player al PlayerView en el update callback (se ejecuta después del factory y en recompos)
+                                if (pv.player !== pagePlayer) {
+                                    pv.player = pagePlayer
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
                         )
-                    } else {
+                    } else if (currentVideo.videoUrl.isEmpty()) {
                         // Fallback si no hay URL
                         Column(
                             modifier = Modifier.fillMaxSize(),
@@ -1314,35 +1394,7 @@ fun ContestVideoCarouselScreen(
                             )
                     )
                     
-                    // Icono "LIVE" clickeable en esquina superior izquierda
-                    IconButton(
-                        onClick = onStartLive,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(8.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_live),
-                            contentDescription = "Iniciar Live",
-                            tint = Color.White,
-                            modifier = Modifier.size(40.dp)
-                        )
-                    }
-                    
-                    // Indicador estático de swipe en esquina superior derecha
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "<<<",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
+
             
             // Información del video en la parte inferior con animación de entrada
             val infoAlpha by animateFloatAsState(
@@ -1460,32 +1512,70 @@ fun ContestVideoCarouselScreen(
                     Spacer(Modifier.height(10.dp))
                 }
                 
-                // Badge del concurso
+                // Badge del concurso - Clickeable para ir al catálogo
                 if (currentVideo.contestId.isNotEmpty()) {
                     Surface(
                         color = PopArtColors.Yellow,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.clickable {
+                            android.util.Log.d("LiveCarousel", "🏆 Navegando al concurso: ${currentVideo.contestId}")
+                            onSwipeLeft() // Abre el catálogo
+                        }
                     ) {
-                        Text(
-                            currentVideo.contestId,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            color = PopArtColors.Black,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "🏆",
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                currentVideo.contestId,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = PopArtColors.Black
+                            )
+                            Text(
+                                "→",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = PopArtColors.Black
+                            )
+                        }
                     }
                 } else {
                     Surface(
                         color = PopArtColors.Yellow.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.clickable {
+                            android.util.Log.d("LiveCarousel", "🏆 Navegando al catálogo de concursos")
+                            onSwipeLeft() // Abre el catálogo
+                        }
                     ) {
-                        Text(
-                            "Concurso",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            color = PopArtColors.Black,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "🏆",
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "Concurso",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = PopArtColors.Black
+                            )
+                            Text(
+                                "→",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = PopArtColors.Black
+                            )
+                        }
                     }
                 }
             }
@@ -2298,10 +2388,10 @@ fun LiveViewerScreen(
     }
 }
 
-// Pantalla de catálogo (Lives y Concursos)
+// Pantalla de catálogo (Lives y Concursos) - ESTILO MODERNO iOS/TikTok
 @Composable
 fun LiveCatalogScreen(
-    lives: List<Concert>,
+    lives: List<LiveStream>,  // LIVES REALES DE FIREBASE
     fastContests: List<Contest>,
     highImpactContests: List<Contest>,
     colors: AppColors,
@@ -2313,6 +2403,25 @@ fun LiveCatalogScreen(
     var currentTab by remember { mutableStateOf(0) } // 0 = Lives, 1 = Concursos
     var contestSubTab by remember { mutableStateOf(0) } // 0 = Rápidos, 1 = Alto Impacto
     var swipeOffset by remember { mutableStateOf(0f) }
+    
+    // Animación del pill indicator
+    val tabIndicatorOffset by animateFloatAsState(
+        targetValue = if (currentTab == 0) 0f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "tabIndicator"
+    )
+    
+    val contestTabIndicatorOffset by animateFloatAsState(
+        targetValue = if (contestSubTab == 0) 0f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "contestTabIndicator"
+    )
     
     Box(
         modifier = Modifier
@@ -2371,44 +2480,89 @@ fun LiveCatalogScreen(
                 }
             }
             
-            // Tabs
-            Row(
+            // Tabs estilo iOS con pill indicator animado
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
-                Button(
-                    onClick = { currentTab = 0 },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (currentTab == 0) colors.primary else colors.surface
-                    ),
-                    shape = RoundedCornerShape(24.dp)
+                // Fondo del tab bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (colors.background == PopArtColors.Black) {
+                        Color.White.copy(alpha = 0.1f)
+                    } else {
+                        colors.surface.copy(alpha = 0.3f)
+                    }
                 ) {
-                    Text(
-                        "LIVES",
-                        fontWeight = FontWeight.Black,
-                        color = if (currentTab == 0) PopArtColors.Black else colors.text
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .padding(4.dp)
+                    ) {
+                        // Pill indicator animado
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .offset(x = (tabIndicatorOffset * 100).dp)
+                                .background(
+                                    if (colors.background == PopArtColors.Black) {
+                                        Color.White.copy(alpha = 0.2f)
+                                    } else {
+                                        Color.White
+                                    },
+                                    RoundedCornerShape(16.dp)
+                                )
+                        )
+                    }
                 }
-                Button(
-                    onClick = { currentTab = 1 },
+                
+                // Botones de tabs
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (currentTab == 1) colors.primary else colors.surface
-                    ),
-                    shape = RoundedCornerShape(24.dp)
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .padding(4.dp)
                 ) {
-                    Text(
-                        "CONCURSOS",
-                        fontWeight = FontWeight.Black,
-                        color = if (currentTab == 1) PopArtColors.Black else colors.text
-                    )
+                    TextButton(
+                        onClick = { currentTab = 0 },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            "LIVES",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp,
+                            color = if (currentTab == 0) {
+                                if (colors.background == PopArtColors.Black) Color.White else PopArtColors.Black
+                            } else {
+                                colors.text.copy(alpha = 0.5f)
+                            }
+                        )
+                    }
+                    TextButton(
+                        onClick = { currentTab = 1 },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            "CONCURSOS",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp,
+                            color = if (currentTab == 1) {
+                                if (colors.background == PopArtColors.Black) Color.White else PopArtColors.Black
+                            } else {
+                                colors.text.copy(alpha = 0.5f)
+                            }
+                        )
+                    }
                 }
             }
             
@@ -2420,62 +2574,250 @@ fun LiveCatalogScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 if (currentTab == 0) {
-                    // Lives
-                    item {
-                        Text(
-                            "Próximos eventos en vivo",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.text,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-                    
-                    items(lives.size) { index ->
-                        val live = lives[index]
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onLiveClick(index) },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = colors.surface
-                            )
-                        ) {
+                    // Lives - Mostrar lives reales o mensaje para crear uno
+                    if (lives.isEmpty()) {
+                        // No hay lives activos - Animar a crear uno
+                        item {
+                            Spacer(Modifier.height(40.dp))
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                // Icono animado
+                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                val scale by infiniteTransition.animateFloat(
+                                    initialValue = 1f,
+                                    targetValue = 1.1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "scale"
+                                )
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .size(120.dp)
+                                        .scale(scale)
+                                        .background(
+                                            Brush.radialGradient(
+                                                colors = listOf(
+                                                    PopArtColors.Pink.copy(alpha = 0.3f),
+                                                    Color.Transparent
+                                                )
+                                            ),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("🎥", fontSize = 64.sp)
+                                }
+                                
+                                Spacer(Modifier.height(24.dp))
+                                
+                                Text(
+                                    "No hay transmisiones en vivo",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = colors.text,
+                                    textAlign = TextAlign.Center
+                                )
+                                
+                                Spacer(Modifier.height(8.dp))
+                                
+                                Text(
+                                    "¡Sé el primero en hacer un live!",
+                                    fontSize = 14.sp,
+                                    color = colors.textSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                
+                                Spacer(Modifier.height(32.dp))
+                                
+                                // Botón CTA estilo TikTok
+                                Button(
+                                    onClick = onStartLive,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.8f)
+                                        .height(56.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = PopArtColors.Pink
+                                    ),
+                                    shape = RoundedCornerShape(28.dp),
+                                    elevation = ButtonDefaults.buttonElevation(
+                                        defaultElevation = 8.dp,
+                                        pressedElevation = 4.dp
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        "Iniciar Live",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Hay lives activos - Mostrarlos
+                        item {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
+                                    .padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(60.dp)
-                                        .background(colors.primary, RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(live.emoji, fontSize = 32.sp)
-                                }
-                                Spacer(Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        live.name,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.text
-                                    )
-                                    Text(
-                                        "${live.location} • ${live.date} ${live.time}",
-                                        fontSize = 12.sp,
-                                        color = colors.textSecondary
-                                    )
-                                }
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "Ver",
-                                    tint = colors.primary,
-                                    modifier = Modifier.size(32.dp)
+                                        .size(8.dp)
+                                        .background(PopArtColors.Pink, CircleShape)
                                 )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Próximos eventos",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = colors.text
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "(${lives.size})",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
+                        
+                        items(lives.size) { index ->
+                            val liveStream = lives[index]
+                            
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onLiveClick(index) },
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (colors.background == PopArtColors.Black) {
+                                        Color.White.copy(alpha = 0.08f)
+                                    } else {
+                                        colors.surface
+                                    }
+                                ),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (colors.background == PopArtColors.Black) 0.dp else 4.dp
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Avatar del usuario en vivo
+                                    Box(
+                                        modifier = Modifier.size(56.dp)
+                                    ) {
+                                        // Avatar con emoji o inicial
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        colors = listOf(
+                                                            PopArtColors.Pink,
+                                                            PopArtColors.Purple
+                                                        )
+                                                    ),
+                                                    CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                liveStream.artistName.firstOrNull()?.uppercase() ?: "L",
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color.White
+                                            )
+                                        }
+                                        
+                                        // Badge de LIVE
+                                        Surface(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .offset(x = 4.dp, y = 4.dp),
+                                            color = PopArtColors.Pink,
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                "LIVE",
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    
+                                    Spacer(Modifier.width(16.dp))
+                                    
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "${liveStream.artistName} en vivo",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colors.text
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            liveStream.location,
+                                            fontSize = 13.sp,
+                                            color = colors.textSecondary,
+                                            maxLines = 1
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Person,
+                                                contentDescription = null,
+                                                tint = colors.textSecondary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                "${liveStream.viewers} espectadores",
+                                                fontSize = 12.sp,
+                                                color = colors.textSecondary,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                    
+                                    // Botón de play
+                                    Surface(
+                                        modifier = Modifier.size(48.dp),
+                                        shape = CircleShape,
+                                        color = PopArtColors.Pink
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.PlayArrow,
+                                                contentDescription = "Ver",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2493,44 +2835,87 @@ fun LiveCatalogScreen(
                             
                             Spacer(Modifier.height(8.dp))
                             
-                            // Sub-tabs para tipos de concursos
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            // Sub-tabs estilo iOS con pill indicator
+                            Box(
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Button(
-                                    onClick = { contestSubTab = 0 },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(40.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (contestSubTab == 0) colors.primary else colors.surface
-                                    ),
-                                    shape = RoundedCornerShape(20.dp)
+                                // Fondo del tab bar
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (colors.background == PopArtColors.Black) {
+                                        Color.White.copy(alpha = 0.1f)
+                                    } else {
+                                        colors.surface.copy(alpha = 0.3f)
+                                    }
                                 ) {
-                                    Text(
-                                        "🚀 Rápidos",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = if (contestSubTab == 0) PopArtColors.Black else colors.text
-                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(44.dp)
+                                            .padding(4.dp)
+                                    ) {
+                                        // Pill indicator animado
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                                .offset(x = (contestTabIndicatorOffset * 100).dp)
+                                                .background(
+                                                    if (colors.background == PopArtColors.Black) {
+                                                        Color.White.copy(alpha = 0.2f)
+                                                    } else {
+                                                        Color.White
+                                                    },
+                                                    RoundedCornerShape(16.dp)
+                                                )
+                                        )
+                                    }
                                 }
-                                Button(
-                                    onClick = { contestSubTab = 1 },
+                                
+                                // Botones de tabs
+                                Row(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .height(40.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (contestSubTab == 1) colors.primary else colors.surface
-                                    ),
-                                    shape = RoundedCornerShape(20.dp)
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .padding(4.dp)
                                 ) {
-                                    Text(
-                                        "🌟 Alto Impacto",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = if (contestSubTab == 1) PopArtColors.Black else colors.text
-                                    )
+                                    TextButton(
+                                        onClick = { contestSubTab = 0 },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Text(
+                                            "🚀 Rápidos",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (contestSubTab == 0) {
+                                                if (colors.background == PopArtColors.Black) Color.White else PopArtColors.Black
+                                            } else {
+                                                colors.text.copy(alpha = 0.5f)
+                                            }
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = { contestSubTab = 1 },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Text(
+                                            "🌟 Alto Impacto",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (contestSubTab == 1) {
+                                                if (colors.background == PopArtColors.Black) Color.White else PopArtColors.Black
+                                            } else {
+                                                colors.text.copy(alpha = 0.5f)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2543,9 +2928,13 @@ fun LiveCatalogScreen(
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(20.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = colors.surface.copy(alpha = 0.5f)
+                                containerColor = if (colors.background == PopArtColors.Black) {
+                                    Color.White.copy(alpha = 0.08f)
+                                } else {
+                                    colors.surface.copy(alpha = 0.5f)
+                                }
                             )
                         ) {
                             Column(
@@ -2616,100 +3005,253 @@ fun LiveCatalogScreen(
                     
                     items(contestsToShow.size) { index ->
                         val contest = contestsToShow[index]
+                        
+                        // Card premium con degradado y sombra
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onContestClick(contest) },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(20.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = contest.color
+                                containerColor = Color.Transparent
+                            ),
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = if (colors.background == PopArtColors.Black) 0.dp else 8.dp,
+                                pressedElevation = if (colors.background == PopArtColors.Black) 0.dp else 4.dp
                             )
                         ) {
-                            Row(
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(20.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = if (colors.background == PopArtColors.Black) {
+                                                // En modo oscuro, usar colores más vibrantes
+                                                listOf(
+                                                    contest.color.copy(alpha = 0.9f),
+                                                    contest.color.copy(alpha = 0.75f)
+                                                )
+                                            } else {
+                                                listOf(
+                                                    contest.color,
+                                                    contest.color.copy(alpha = 0.85f)
+                                                )
+                                            },
+                                            start = Offset(0f, 0f),
+                                            end = Offset(1000f, 1000f)
+                                        )
+                                    )
                             ) {
-                                Text(
-                                    contest.emoji,
-                                    fontSize = 48.sp
-                                )
-                                Spacer(Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    // Badge de categoría
-                                    Surface(
-                                        color = PopArtColors.Black.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(8.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(20.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Icono grande con fondo
+                                    Box(
+                                        modifier = Modifier
+                                            .size(72.dp)
+                                            .background(
+                                                Color.White.copy(alpha = 0.2f),
+                                                RoundedCornerShape(16.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            contest.category,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = PopArtColors.Black,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            contest.emoji,
+                                            fontSize = 40.sp
                                         )
                                     }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        contest.name,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = PopArtColors.Black
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        contest.prize,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = PopArtColors.Black.copy(alpha = 0.8f)
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        contest.deadline,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = PopArtColors.Black.copy(alpha = 0.6f)
-                                    )
+                                    
+                                    Spacer(Modifier.width(16.dp))
+                                    
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        // Badge de categoría con pill
+                                        Surface(
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                contest.category,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = PopArtColors.Black,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                        
+                                        Spacer(Modifier.height(8.dp))
+                                        
+                                        Text(
+                                            contest.name,
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = PopArtColors.Black,
+                                            lineHeight = 20.sp
+                                        )
+                                        
+                                        Spacer(Modifier.height(6.dp))
+                                        
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "🎁",
+                                                fontSize = 12.sp
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                contest.prize,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = PopArtColors.Black.copy(alpha = 0.85f)
+                                            )
+                                        }
+                                        
+                                        Spacer(Modifier.height(6.dp))
+                                        
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "⏰",
+                                                fontSize = 11.sp
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                contest.deadline,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = PopArtColors.Black.copy(alpha = 0.7f)
+                                            )
+                                        }
+                                    }
+                                    
+                                    Spacer(Modifier.width(12.dp))
+                                    
+                                    // Botón de acción
+                                    Surface(
+                                        modifier = Modifier.size(44.dp),
+                                        shape = CircleShape,
+                                        color = Color.White.copy(alpha = 0.9f)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.KeyboardArrowRight,
+                                                contentDescription = "Ver",
+                                                tint = PopArtColors.Black,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
                                 }
-                                Icon(
-                                    Icons.Default.KeyboardArrowRight,
-                                    contentDescription = "Ver",
-                                    tint = PopArtColors.Black,
-                                    modifier = Modifier.size(32.dp)
-                                )
                             }
                         }
                     }
                 }
                 
-                // Botón "Iniciar Live" al final
+                // Botón "Iniciar Live" estilo TikTok al final
                 item {
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = onStartLive,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = PopArtColors.Pink
+                    Spacer(Modifier.height(24.dp))
+                    
+                    // Card contenedor con degradado
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color.Transparent
                         ),
-                        shape = RoundedCornerShape(28.dp)
+                        elevation = CardDefaults.cardElevation(
+                            defaultElevation = if (colors.background == PopArtColors.Black) 0.dp else 12.dp
+                        )
                     ) {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "INICIAR TRANSMISIÓN EN VIVO",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = if (colors.background == PopArtColors.Black) {
+                                            // En modo oscuro, degradado más vibrante
+                                            listOf(
+                                                PopArtColors.Pink.copy(alpha = 0.95f),
+                                                Color(0xFFFF1744).copy(alpha = 0.95f)
+                                            )
+                                        } else {
+                                            listOf(
+                                                PopArtColors.Pink,
+                                                Color(0xFFFF1744)
+                                            )
+                                        }
+                                    )
+                                )
+                                .clickable { onStartLive() }
+                                .padding(20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                // Icono con animación de pulso
+                                val infiniteTransition = rememberInfiniteTransition(label = "liveButton")
+                                val scale by infiniteTransition.animateFloat(
+                                    initialValue = 1f,
+                                    targetValue = 1.15f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(800, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "scale"
+                                )
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .scale(scale)
+                                        .background(
+                                            Color.White.copy(alpha = 0.3f),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                                
+                                Spacer(Modifier.width(16.dp))
+                                
+                                Column {
+                                    Text(
+                                        "Iniciar Transmisión",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        "Comparte tu talento en vivo",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White.copy(alpha = 0.9f)
+                                    )
+                                }
+                                
+                                Spacer(Modifier.weight(1f))
+                                
+                                Icon(
+                                    Icons.Default.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
                     }
+                    
                     Spacer(Modifier.height(32.dp))
                 }
             }

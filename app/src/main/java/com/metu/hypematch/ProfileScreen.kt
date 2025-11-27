@@ -60,8 +60,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.ExperimentalMaterial3Api
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,11 +80,15 @@ fun ProfileScreen(
     val focusManager = LocalFocusManager.current
     val authManager = remember { AuthManager(context) }
     val firebaseManager = remember { FirebaseManager() }
+    val imageCacheManager = remember { ImageCacheManager(context) }
     val scope = rememberCoroutineScope()
     
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var showEditDialog by remember { mutableStateOf(false) }
+    
+    // Pull to refresh
+    var isRefreshing by remember { mutableStateOf(false) }
     var showUploadScreen by remember { mutableStateOf(false) }
     var showGalleryPicker by remember { mutableStateOf(false) }
     var isUploadingMedia by remember { mutableStateOf(false) }
@@ -92,20 +102,41 @@ fun ProfileScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var showStoryViewer by remember { mutableStateOf(false) }
     var currentStoryIndex by remember { mutableStateOf(0) }
-    var isRefreshing by remember { mutableStateOf(false) }
     var pressedStoryUrl by remember { mutableStateOf<String?>(null) }
     
     val isAnonymous = remember { authManager.isAnonymous() }
     val userId = authManager.getUserId() ?: ""
     
-    // Función para recargar todos los datos
+    // Limpiar caché antiguo al iniciar (solo una vez)
+    LaunchedEffect(Unit) {
+        imageCacheManager.cleanOldCache()
+        val cacheSize = imageCacheManager.getCacheSize()
+        android.util.Log.d("ProfileScreen", "🗂️ Tamaño de caché de imágenes: ${String.format("%.2f", cacheSize)} MB")
+    }
+    
+    // 🚀 OPTIMIZACIÓN: Función para recargar todos los datos en paralelo
     suspend fun refreshProfile() {
         if (userId.isNotEmpty() && !isAnonymous) {
             try {
-                android.util.Log.d("ProfileScreen", "🔄 Recargando perfil...")
-                userProfile = firebaseManager.getFullUserProfile(userId)
-                songMediaUrls = firebaseManager.getUserSongMedia(userId)
-                userStories = firebaseManager.getUserStories(userId)
+                android.util.Log.d("ProfileScreen", "🔄 Recargando perfil en paralelo...")
+                
+                // ✅ CARGA PARALELA en refresh también
+                kotlinx.coroutines.coroutineScope {
+                    val profileDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                        firebaseManager.getFullUserProfile(userId)
+                    }
+                    val mediaDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                        firebaseManager.getUserSongMedia(userId)
+                    }
+                    val storiesDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                        firebaseManager.getUserStories(userId)
+                    }
+                    
+                    userProfile = profileDeferred.await()
+                    songMediaUrls = mediaDeferred.await()
+                    userStories = storiesDeferred.await()
+                }
+                
                 android.util.Log.d("ProfileScreen", "✅ Perfil recargado")
             } catch (e: Exception) {
                 android.util.Log.e("ProfileScreen", "❌ Error recargando: ${e.message}")
@@ -113,20 +144,59 @@ fun ProfileScreen(
         }
     }
     
-    // Cargar perfil completo, medios de canciones e historias
+    // Función para manejar el refresh
+    suspend fun onRefresh() {
+        isRefreshing = true
+        refreshProfile()
+        isRefreshing = false
+    }
+    
+    // 🚀 OPTIMIZACIÓN 1: CARGA PARALELA - Cargar perfil completo, medios de canciones e historias
     LaunchedEffect(userId) {
         if (userId.isNotEmpty() && !isAnonymous) {
             isLoading = true
             try {
-                android.util.Log.d("ProfileScreen", "📝 Cargando perfil...")
-                userProfile = firebaseManager.getFullUserProfile(userId)
+                android.util.Log.d("ProfileScreen", "🚀 Iniciando carga paralela...")
+                val startTime = System.currentTimeMillis()
                 
-                android.util.Log.d("ProfileScreen", "🎵 Cargando medios...")
-                songMediaUrls = firebaseManager.getUserSongMedia(userId)
+                // ✅ CARGA PARALELA: Ejecutar las 3 operaciones simultáneamente
+                kotlinx.coroutines.coroutineScope {
+                    val profileDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                        android.util.Log.d("ProfileScreen", "📝 [Paralelo] Cargando perfil...")
+                        firebaseManager.getFullUserProfile(userId)
+                    }
+                    val mediaDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                        android.util.Log.d("ProfileScreen", "🎵 [Paralelo] Cargando medios...")
+                        firebaseManager.getUserSongMedia(userId)
+                    }
+                    val storiesDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                        android.util.Log.d("ProfileScreen", "📸 [Paralelo] Cargando historias...")
+                        firebaseManager.getUserStories(userId)
+                    }
+                    
+                    // ⏱️ ESPERA CONCURRENTE: Solo bloquea hasta que la más lenta termine
+                    userProfile = profileDeferred.await()
+                    songMediaUrls = mediaDeferred.await()
+                    userStories = storiesDeferred.await()
+                }
                 
-                android.util.Log.d("ProfileScreen", "📸 Cargando historias...")
-                userStories = firebaseManager.getUserStories(userId)
-                android.util.Log.d("ProfileScreen", "✅ ${userStories.size} historias cargadas")
+                val loadTime = System.currentTimeMillis() - startTime
+                android.util.Log.d("ProfileScreen", "✅ Carga paralela completada en ${loadTime}ms")
+                android.util.Log.d("ProfileScreen", "📊 Historias: ${userStories.size}, Medios: ${songMediaUrls.size}")
+                
+                // Cachear imágenes en background (no bloquea la UI)
+                userProfile?.let { profile ->
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        if (profile.profileImageUrl.isNotEmpty()) {
+                            android.util.Log.d("ProfileScreen", "💾 Cacheando imagen de perfil...")
+                            imageCacheManager.cacheImage(profile.profileImageUrl, "profile")
+                        }
+                        if (profile.coverImageUrl.isNotEmpty()) {
+                            android.util.Log.d("ProfileScreen", "💾 Cacheando imagen de portada...")
+                            imageCacheManager.cacheImage(profile.coverImageUrl, "cover")
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 android.util.Log.e("ProfileScreen", "❌ Error cargando datos: ${e.message}")
             } finally {
@@ -135,22 +205,6 @@ fun ProfileScreen(
         } else if (isAnonymous) {
             userProfile = UserProfile(username = "Invitado")
             isLoading = false
-        }
-    }
-    
-    // Función para recargar historias manualmente
-    fun reloadStories() {
-        scope.launch {
-            try {
-                android.util.Log.d("ProfileScreen", "�u Recargando historias...")
-                val stories = firebaseManager.getUserStories(userId)
-                userStories = stories
-                android.util.Log.d("ProfileScreen", "✅ ${stories.size} historias cargadas")
-                android.widget.Toast.makeText(context, "Historias: ${stories.size}", android.widget.Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                android.util.Log.e("ProfileScreen", "❌ Error: ${e.message}")
-                android.widget.Toast.makeText(context, "Error al cargar historias", android.widget.Toast.LENGTH_SHORT).show()
-            }
         }
     }
     
@@ -169,6 +223,11 @@ fun ProfileScreen(
                     }
                     firebaseManager.updateProfileImage(userId, imageUrl)
                     userProfile = userProfile?.copy(profileImageUrl = imageUrl)
+                    
+                    // Cachear imagen inmediatamente para carga instantánea
+                    android.util.Log.d("ProfileScreen", "💾 Cacheando imagen de perfil...")
+                    imageCacheManager.cacheImage(imageUrl, "profile")
+                    android.util.Log.d("ProfileScreen", "✅ Imagen de perfil cacheada")
                 } catch (e: Exception) {
                     android.util.Log.e("ProfileScreen", "Error: ${e.message}")
                 } finally {
@@ -194,6 +253,11 @@ fun ProfileScreen(
                     }
                     firebaseManager.updateCoverImage(userId, imageUrl)
                     userProfile = userProfile?.copy(coverImageUrl = imageUrl)
+                    
+                    // Cachear imagen inmediatamente para carga instantánea
+                    android.util.Log.d("ProfileScreen", "💾 Cacheando imagen de portada...")
+                    imageCacheManager.cacheImage(imageUrl, "cover")
+                    android.util.Log.d("ProfileScreen", "✅ Imagen de portada cacheada")
                 } catch (e: Exception) {
                     android.util.Log.e("ProfileScreen", "Error: ${e.message}")
                 } finally {
@@ -669,7 +733,15 @@ fun ProfileScreen(
                     color = colors.primary
                 )
             } else {
-                Box(
+                val swipeRefreshState = rememberSwipeRefreshState(isRefreshing = isRefreshing)
+                
+                SwipeRefresh(
+                    state = swipeRefreshState,
+                    onRefresh = {
+                        scope.launch {
+                            onRefresh()
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = 80.dp)
@@ -692,8 +764,9 @@ fun ProfileScreen(
                                 .clickable { if (!isAnonymous) coverImageLauncher.launch("image/*") }
                         ) {
                             if (userProfile?.coverImageUrl?.isNotEmpty() == true) {
-                                AsyncImage(
-                                    model = userProfile?.coverImageUrl,
+                                CachedAsyncImage(
+                                    imageUrl = userProfile?.coverImageUrl ?: "",
+                                    imageType = "cover",
                                     contentDescription = "Portada",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
@@ -805,8 +878,9 @@ fun ProfileScreen(
                                         )
                                 ) {
                                     if (userProfile?.profileImageUrl?.isNotEmpty() == true) {
-                                        AsyncImage(
-                                            model = userProfile?.profileImageUrl,
+                                        CachedAsyncImage(
+                                            imageUrl = userProfile?.profileImageUrl ?: "",
+                                            imageType = "profile",
                                             contentDescription = "Perfil",
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop
@@ -1900,36 +1974,6 @@ fun ProfileScreen(
                     }
                     
                     item { Spacer(Modifier.height(100.dp)) }
-                    }
-                    
-                    // Botón flotante de recarga
-                    FloatingActionButton(
-                        onClick = {
-                            scope.launch {
-                                isRefreshing = true
-                                refreshProfile()
-                                isRefreshing = false
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(24.dp),
-                        containerColor = PopArtColors.Yellow,
-                        contentColor = PopArtColors.Black
-                    ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = PopArtColors.Black,
-                                strokeWidth = 3.dp
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Recargar",
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
                     }
                 }
             }

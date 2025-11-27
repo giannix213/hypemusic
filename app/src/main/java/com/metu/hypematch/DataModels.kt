@@ -144,6 +144,7 @@ data class Story(
 // Modelo para estados/stories de artistas (sistema antiguo)
 data class ArtistStory(
     val id: String = "",
+    val userId: String = "", // ID del usuario que creó la historia
     val artistId: String = "",
     val artistName: String = "",
     val artistImageUrl: String = "",

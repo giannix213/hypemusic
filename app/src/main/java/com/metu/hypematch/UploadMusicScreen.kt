@@ -33,6 +33,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -216,6 +219,7 @@ fun UploadMusicScreen(onBack: () -> Unit) {
     val authManager = remember { AuthManager(context) }
     val scope = rememberCoroutineScope()
     val userId = authManager.getUserId() ?: ""
+    val focusManager = LocalFocusManager.current
     
     var title by remember { mutableStateOf("") }
     var artistName by remember { mutableStateOf("") }
@@ -359,7 +363,12 @@ fun UploadMusicScreen(onBack: () -> Unit) {
                 }
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp),
+                .padding(20.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        focusManager.clearFocus()
+                    })
+                },
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Imagen de portada generada automáticamente

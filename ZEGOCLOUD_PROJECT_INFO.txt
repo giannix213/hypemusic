@@ -1,0 +1,112 @@
+Subject: HypeMatch - Android Live Streaming Integration Request
+
+Hello,
+
+Thank you for reaching out. Here are the details about my project:
+
+1. SCENARIOS:
+Live streaming platform for music artists (similar to TikTok Live/Instagram Live) featuring:
+- Vertical video streaming (portrait mode)
+- Real-time chat during streams
+- Virtual gifts system
+- Push notifications when artists go live
+- Automatic recording of live streams
+- Real-time viewer count
+
+2. USE CASE:
+Social music app where artists can broadcast live performances and fans can watch, interact, and support them.
+
+Artist Flow:
+- Press "Start Live" from profile
+- Configure title and description
+- Start vertical live stream
+- See real-time comments and gifts
+- End stream (automatically saved)
+
+Fan Flow:
+- Receive notification when favorite artist goes live
+- Join live from "Active Lives" catalog
+- Watch full-screen vertical stream
+- Send real-time comments
+- Send virtual gifts
+- Swipe vertically to switch between different live streams
+
+3. PLATFORM:
+Android (Native)
+- minSdk: 24 (Android 7.0)
+- targetSdk: 36 (Android 14+)
+- compileSdk: 36
+
+4. FRAMEWORK & LANGUAGE:
+Language: Kotlin 100%
+UI Framework: Jetpack Compose (Modern Android UI)
+Architecture: MVVM with Coroutines and StateFlow
+
+Backend:
+- Firebase Firestore (database)
+- Firebase Storage (media files)
+- Firebase Auth (authentication)
+- Firebase Cloud Functions (notifications)
+
+Other Libraries:
+- ExoPlayer (video playback)
+- CameraX (video recording)
+- Coil (image loading)
+- Material3 (design system)
+
+5. COMPANY NAME AND WEBSITE:
+Project Name: HypeMatch
+Type: Independent startup project
+Description: Social music platform connecting emerging artists with fans through short videos and live streaming
+GitHub Repository: https://github.com/giannix213/hypemusic
+Website: In development (app is the main product)
+
+6. EMAIL ID FOR ZEGO ACCOUNT:
+[REPLACE_WITH_YOUR_EMAIL]
+
+Current App ID: 2127871637
+App Sign: Already configured in project
+
+---
+
+TECHNICAL REQUIREMENTS:
+
+Live Streaming:
+- Vertical video (9:16 aspect ratio)
+- Adaptive quality based on connection
+- Low latency (< 3 seconds)
+- Support for multiple simultaneous viewers
+
+Real-time Chat:
+- Text messages during live
+- Emoji/reaction system
+- Basic moderation
+
+Desired Features:
+- Automatic live recording
+- Viewer statistics
+- Auto-reconnection on connection loss
+- Battery optimization
+
+---
+
+CURRENT INTEGRATION STATUS:
+
+Already Implemented:
+✓ ZegoConfig.kt with credentials configured
+✓ LiveRecordingScreen.kt (streamer interface)
+✓ LiveStreamViewerScreen.kt (viewer interface)
+✓ Native Activity prepared
+✓ Permissions configured in AndroidManifest
+
+What I Need:
+- ZegoCloud SDK for Android
+- Integration documentation for Jetpack Compose
+- Sample code for vertical live streaming
+
+The code is ready, I just need the SDK to complete the integration.
+
+Thank you for your assistance!
+
+Best regards,
+[REPLACE_WITH_YOUR_NAME]

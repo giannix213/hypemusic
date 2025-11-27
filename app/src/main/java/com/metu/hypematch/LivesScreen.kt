@@ -224,6 +224,20 @@ fun LiveRecordingScreen(onBack: () -> Unit, onVideoRecorded: (Uri) -> Unit) {
     val context = LocalContext.current
     var hasPermissions by remember { mutableStateOf(false) }
     var permissionsDenied by remember { mutableStateOf(false) }
+    var showGalleryPicker by remember { mutableStateOf(false) }
+    
+    // Launcher para seleccionar video de galería
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            android.util.Log.d("LivesScreen", "📸 Video seleccionado de galería: $uri")
+            onVideoRecorded(uri)
+        } else {
+            android.util.Log.d("LivesScreen", "❌ No se seleccionó ningún video")
+        }
+        showGalleryPicker = false
+    }
     
     // Launcher para permisos
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -331,6 +345,10 @@ fun LiveRecordingScreen(onBack: () -> Unit, onVideoRecorded: (Uri) -> Unit) {
                 onVideoRecorded = { uri ->
                     android.util.Log.d("LivesScreen", "📹 Video grabado exitosamente: $uri")
                     onVideoRecorded(uri)
+                },
+                onOpenGallery = {
+                    android.util.Log.d("LivesScreen", "📸 Abriendo selector de galería")
+                    galleryLauncher.launch("video/*")
                 }
             )
         }
@@ -518,20 +536,88 @@ fun ContestVideoCard(entry: ContestEntry, onClick: () -> Unit) {
 
 // Pantalla de detalles del concurso con navegación por swipe
 @Composable
-fun ContestDetailScreen(contest: Contest, onBack: () -> Unit, onRecordVideo: () -> Unit, onViewGallery: () -> Unit = {}) {
+fun ContestDetailScreen(
+    contest: Contest, 
+    onBack: () -> Unit, 
+    onRecordVideo: () -> Unit, 
+    onViewGallery: () -> Unit = {},
+    onUploadVideo: (Uri) -> Unit = {} // Nuevo callback para subir video de galería
+) {
     val context = LocalContext.current
     val authManager = remember { AuthManager(context) }
     val firebaseManager = remember { FirebaseManager() }
     val scope = rememberCoroutineScope()
     
+    // Estados
     var showParticipants by remember { mutableStateOf(false) }
     var currentPage by remember { mutableStateOf(0) } // 0 = Info, 1 = Galería
     var myVideos by remember { mutableStateOf<List<ContestEntry>>(emptyList()) }
     var allVideos by remember { mutableStateOf<List<ContestEntry>>(emptyList()) }
     var isLoadingVideos by remember { mutableStateOf(false) }
     var swipeOffset by remember { mutableStateOf(0f) }
+    var isUploadingVideo by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableStateOf(0) }
     
     val userId = authManager.getUserId() ?: ""
+    
+    // Launcher para seleccionar video de galería
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            android.util.Log.d("ContestDetail", "📸 Video seleccionado: $uri")
+            // Subir video directamente
+            scope.launch {
+                try {
+                    isUploadingVideo = true
+                    uploadProgress = 0
+                    
+                    val username = authManager.getUserName()
+                    
+                    android.util.Log.d("ContestDetail", "🎬 Subiendo video a concurso...")
+                    
+                    // Paso 1: Subir video a Storage
+                    val videoUrl = firebaseManager.uploadContestVideo(
+                        uri = uri,
+                        userId = userId,
+                        onProgress = { progress ->
+                            uploadProgress = progress
+                            android.util.Log.d("ContestDetail", "📊 Progreso: $progress%")
+                        }
+                    )
+                    
+                    // Paso 2: Obtener foto de perfil
+                    val userProfile = firebaseManager.getUserProfile(userId)
+                    val profilePictureUrl = userProfile?.profileImageUrl ?: ""
+                    
+                    // Paso 3: Crear entrada en Firestore
+                    val entryId = firebaseManager.createContestEntry(
+                        userId = userId,
+                        username = username,
+                        videoUrl = videoUrl,
+                        title = "Video de ${contest.name}",
+                        description = "Participación en ${contest.name}",
+                        contestId = contest.name,
+                        profilePictureUrl = profilePictureUrl
+                    )
+                    
+                    android.util.Log.d("ContestDetail", "✅ Video publicado: $entryId")
+                    
+                    // Recargar videos
+                    val entries = firebaseManager.getAllContestEntries()
+                    val contestEntries = entries.filter { it.contestId == contest.name }
+                    allVideos = contestEntries
+                    myVideos = contestEntries.filter { it.userId == userId }
+                    
+                    isUploadingVideo = false
+                    
+                } catch (e: Exception) {
+                    android.util.Log.e("ContestDetail", "❌ Error subiendo video: ${e.message}")
+                    isUploadingVideo = false
+                }
+            }
+        }
+    }
     
     // Cargar videos del concurso
     LaunchedEffect(contest.name) {
@@ -813,6 +899,34 @@ fun ContestDetailScreen(contest: Contest, onBack: () -> Unit, onRecordVideo: () 
                     }
                 }
                 
+                // Botón para subir video de galería
+                Button(
+                    onClick = {
+                        android.util.Log.d("ContestDetail", "📸 Abriendo selector de galería")
+                        galleryLauncher.launch("video/*")
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.Cyan),
+                    shape = RoundedCornerShape(16.dp),
+                    enabled = !isUploadingVideo
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Subir video",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        if (isUploadingVideo) "SUBIENDO... $uploadProgress%" else "SUBIR MI VIDEO",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                }
+                
                 // Botón para grabar
                 Button(
                     onClick = onRecordVideo,
@@ -820,7 +934,8 @@ fun ContestDetailScreen(contest: Contest, onBack: () -> Unit, onRecordVideo: () 
                         .fillMaxWidth()
                         .height(60.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.Pink),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    enabled = !isUploadingVideo
                 ) {
                     Icon(
                         Icons.Default.PlayArrow,
@@ -838,5 +953,44 @@ fun ContestDetailScreen(contest: Contest, onBack: () -> Unit, onRecordVideo: () 
                 }
             }
         }
+    }
+    
+    // Diálogo de carga mientras se sube el video
+    if (isUploadingVideo) {
+        AlertDialog(
+            onDismissRequest = { /* No permitir cerrar mientras sube */ },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = PopArtColors.Pink
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text("Subiendo video...")
+                }
+            },
+            text = {
+                Column {
+                    Text("Por favor espera mientras se sube tu video al concurso.")
+                    Spacer(Modifier.height(16.dp))
+                    LinearProgressIndicator(
+                        progress = uploadProgress / 100f,
+                        modifier = Modifier.fillMaxWidth(),
+                        color = PopArtColors.Pink
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "$uploadProgress%",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {}
+        )
     }
 }

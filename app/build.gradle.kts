@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -29,6 +30,13 @@ android {
             )
             // Firma con keystore de debug para pruebas rápidas
             signingConfig = signingConfigs.getByName("debug")
+        }
+        // 🚀 FASE 3: Build type para benchmark
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
         }
     }
     
@@ -84,6 +92,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material3.adaptive.navigation.suite)
+    implementation(libs.accompanist.swiperefresh)
 
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
@@ -99,8 +108,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
     
-    // Coil para cargar imágenes
+    // 🚀 FASE 2: Coil optimizado para cargar imágenes
     implementation("io.coil-kt:coil-compose:2.5.0")
+    implementation("io.coil-kt:coil-gif:2.5.0")
     
     // Gson para serialización JSON
     implementation("com.google.code.gson:gson:2.10.1")
@@ -119,10 +129,20 @@ dependencies {
     // ZXing para generar códigos QR
     implementation("com.google.zxing:core:3.5.2")
     
-    // ZegoCloud - Comentado temporalmente hasta obtener el SDK
-    // Opción 1: Descargar manualmente desde https://doc-zh.zego.im/article/13783
-    // Opción 2: Usar WebRTC nativo de Android
-    // TODO: Implementar live streaming con alternativa disponible
+    // Agora SDK para Live Streaming
+    implementation("io.agora.rtc:full-sdk:4.2.6")
+    
+    // 🚀 FASE 3: Room Database para caché local
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+    
+    // 🚀 FASE 3: ProfileInstaller para Baseline Profiles
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+    
+    // 🚀 FASE 2: App Startup para inicialización diferida
+    implementation("androidx.startup:startup-runtime:1.1.1")
 
     // Testing
     testImplementation(libs.junit)

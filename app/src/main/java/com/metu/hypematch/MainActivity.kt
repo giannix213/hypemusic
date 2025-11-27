@@ -20,6 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.ExperimentalMaterial3Api
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -63,10 +66,19 @@ class MainActivity : ComponentActivity() {
         android.util.Log.e("TEST_HISTORIAS", "========================================")
         android.util.Log.e("TEST_HISTORIAS", "APP INICIADA - LOGS FUNCIONANDO")
         android.util.Log.e("TEST_HISTORIAS", "========================================")
+        
+        // 🚀 FASE 2 & 3: Configurar ImageLoader optimizado globalmente
+        val imageLoader = ImageLoaderConfig.createImageLoader(this)
+        coil.Coil.setImageLoader(imageLoader)
+        android.util.Log.d("MainActivity", "✅ ImageLoader optimizado configurado")
+        
         enableEdgeToEdge()
         setContent {
             HypeMatchTheme {
-                HypeMatchApp()
+                // 🚀 FASE 2: Proveer managers globalmente
+                ProvideAppManagers {
+                    HypeMatchApp()
+                }
             }
         }
     }
@@ -75,9 +87,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HypeMatchApp() {
     val context = LocalContext.current
-    val authManager = remember { AuthManager(context) }
-    val firebaseManager = remember { FirebaseManager() }
-    val themeManager = remember { ThemeManager(context) }
+    // 🚀 FASE 2: Usar managers desde CompositionLocal (más eficiente)
+    val authManager = rememberAuthManager()
+    val firebaseManager = rememberFirebaseManager()
+    val themeManager = rememberThemeManager()
     val scope = rememberCoroutineScope()
     var showWelcome by rememberSaveable { mutableStateOf(true) }
     var isAuthenticated by rememberSaveable { mutableStateOf(authManager.isUserLoggedIn()) }
@@ -596,6 +609,7 @@ fun RoleSelectionScreen(onRoleSelected: (Boolean) -> Unit) {
 }
 
 // PANTALLA 1: DESCUBRE (Swipe tipo Tinder)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverScreen(
     isDarkMode: Boolean = false,
@@ -603,13 +617,17 @@ fun DiscoverScreen(
     onMenuClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val player = rememberMusicPlayer(context, pauseOnBackground = true) // Pausar en segundo plano
+    val player = rememberMusicPlayer(context, pauseOnBackground = true)
     val scope = rememberCoroutineScope()
-    val firebaseManager = remember { FirebaseManager() }
-    val songLikesManager = remember { SongLikesManager() }
-    val favoritesManager = remember { FavoritesManager(context) }
-    val authManager = remember { AuthManager(context) }
+    // 🚀 FASE 2: Usar managers desde CompositionLocal
+    val firebaseManager = rememberFirebaseManager()
+    val songLikesManager = rememberSongLikesManager()
+    val favoritesManager = rememberFavoritesManager()
+    val authManager = rememberAuthManager()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    
+    // 🚀 FASE 2: ImageLoader para precarga
+    val imageLoader = remember { coil.Coil.imageLoader(context) }
     
     val userId = authManager.getUserId() ?: ""
     
@@ -623,6 +641,25 @@ fun DiscoverScreen(
     // Estado para ver perfil del artista
     var showArtistProfile by remember { mutableStateOf(false) }
     var selectedArtistId by remember { mutableStateOf<String?>(null) }
+    
+    // Pull to refresh
+    var isRefreshing by remember { mutableStateOf(false) }
+    
+    // 🚀 OPTIMIZACIÓN: Función para refrescar con paginación
+    suspend fun refreshSongs() {
+        try {
+            android.util.Log.d("DiscoverScreen", "🔄 Refrescando canciones (paginado)...")
+            artists = if (userId.isNotEmpty()) {
+                firebaseManager.getDiscoverSongs(userId, songLikesManager, limit = 10)
+            } else {
+                firebaseManager.getAllSongs(limit = 10)
+            }
+            currentArtistIndex = 0
+            android.util.Log.d("DiscoverScreen", "✅ Canciones refrescadas: ${artists.size}")
+        } catch (e: Exception) {
+            android.util.Log.e("DiscoverScreen", "❌ Error refrescando: ${e.message}")
+        }
+    }
     
     // Pausar música cuando la app pasa a segundo plano
     DisposableEffect(lifecycleOwner) {
@@ -649,24 +686,55 @@ fun DiscoverScreen(
         }
     }
 
-    // Cargar canciones desde Firebase y filtrar las ya vistas
+    // 🚀 OPTIMIZACIÓN 2: PAGINACIÓN - Cargar solo 10 canciones inicialmente
     LaunchedEffect(Unit) {
         try {
-            android.util.Log.d("DiscoverScreen", "🔍 Iniciando carga de canciones...")
+            android.util.Log.d("DiscoverScreen", "🚀 Iniciando carga PAGINADA de canciones...")
             android.util.Log.d("DiscoverScreen", "👤 UserId: $userId")
+            val startTime = System.currentTimeMillis()
             
-            // Usar la nueva función que filtra automáticamente canciones vistas
+            // ✅ CARGA PAGINADA: Solo 10 canciones inicialmente
             artists = if (userId.isNotEmpty()) {
-                val songs = firebaseManager.getDiscoverSongs(userId, songLikesManager)
+                val songs = firebaseManager.getDiscoverSongs(userId, songLikesManager, limit = 10)
                 android.util.Log.d("DiscoverScreen", "✅ Canciones cargadas (filtradas): ${songs.size}")
                 songs
             } else {
-                val songs = firebaseManager.getAllSongs()
+                val songs = firebaseManager.getAllSongs(limit = 10)
                 android.util.Log.d("DiscoverScreen", "✅ Canciones cargadas (todas): ${songs.size}")
                 songs
             }
             
+            val loadTime = System.currentTimeMillis() - startTime
+            android.util.Log.d("DiscoverScreen", "⚡ Carga completada en ${loadTime}ms")
             android.util.Log.d("DiscoverScreen", "📊 Total de canciones a mostrar: ${artists.size}")
+            isLoading = false
+            
+            // 💡 PRECARGA: Cargar siguiente lote en background (no bloquea UI)
+            if (artists.size >= 10) {
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        android.util.Log.d("DiscoverScreen", "🔄 Precargando siguiente lote...")
+                        val nextSongs = if (userId.isNotEmpty()) {
+                            firebaseManager.getDiscoverSongs(
+                                userId, 
+                                songLikesManager, 
+                                limit = 10,
+                                lastSongId = artists.lastOrNull()?.id
+                            )
+                        } else {
+                            firebaseManager.getAllSongs(
+                                limit = 10,
+                                lastSongId = artists.lastOrNull()?.id
+                            )
+                        }
+                        // Agregar canciones precargadas al final
+                        artists = artists + nextSongs
+                        android.util.Log.d("DiscoverScreen", "✅ Precarga completada: +${nextSongs.size} canciones")
+                    } catch (e: Exception) {
+                        android.util.Log.e("DiscoverScreen", "Error en precarga: ${e.message}")
+                    }
+                }
+            }
             isLoading = false
         } catch (e: Exception) {
             android.util.Log.e("DiscoverScreen", "❌ Error cargando canciones: ${e.message}", e)
@@ -747,22 +815,46 @@ fun DiscoverScreen(
         }
     }
 
-    // Reproducir música del artista actual desde la mitad
+    // 🚀 OPTIMIZACIÓN 4: EXOPLAYER - Reproducir música sin delay fijo usando listeners
     LaunchedEffect(currentArtistIndex, artists.size) {
         try {
-            android.util.Log.d("DiscoverScreen", "LaunchedEffect triggered - Index: $currentArtistIndex, Artists: ${artists.size}")
+            android.util.Log.d("DiscoverScreen", "🎵 Reproduciendo canción - Index: $currentArtistIndex")
             
             if (currentArtistIndex < artists.size && artists.isNotEmpty()) {
                 val artist = artists[currentArtistIndex]
                 android.util.Log.d("DiscoverScreen", "Artista: ${artist.name}")
-                android.util.Log.d("DiscoverScreen", "URL: ${artist.songUrl}")
                 
                 if (artist.songUrl.isNotEmpty()) {
                     // Detener reproducción anterior
                     player.stop()
                     player.clearMediaItems()
                     
-                    // Configurar nueva canción
+                    // ✅ OPTIMIZACIÓN: Usar listener en lugar de delay fijo
+                    val listener = object : Player.Listener {
+                        override fun onPlaybackStateChanged(state: Int) {
+                            if (state == Player.STATE_READY) {
+                                // Canción lista para reproducir
+                                val duration = player.duration
+                                if (duration > 0) {
+                                    player.seekTo(duration / 2)
+                                    android.util.Log.d("DiscoverScreen", "⚡ Reproduciendo desde mitad: ${duration / 2}ms")
+                                }
+                                player.play()
+                                isPlaying = true
+                                player.removeListener(this) // Limpiar listener
+                            }
+                        }
+                        
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            android.util.Log.e("DiscoverScreen", "❌ Error: ${error.message}")
+                            isPlaying = false
+                            player.removeListener(this)
+                        }
+                    }
+                    
+                    player.addListener(listener)
+                    
+                    // Configurar y preparar canción
                     val mediaItem = MediaItem.Builder()
                         .setUri(Uri.parse(artist.songUrl))
                         .build()
@@ -770,20 +862,40 @@ fun DiscoverScreen(
                     player.setMediaItem(mediaItem)
                     player.prepare()
                     
-                    // Esperar a que esté listo y obtener duración
-                    kotlinx.coroutines.delay(500)
-                    
-                    // Buscar a la mitad de la canción
-                    val duration = player.duration
-                    if (duration > 0) {
-                        player.seekTo(duration / 2)
-                        android.util.Log.d("DiscoverScreen", "Reproduciendo desde la mitad: ${duration / 2}ms de ${duration}ms")
+                    // 💡 PRECARGA: Preparar siguiente canción si existe
+                    if (currentArtistIndex + 1 < artists.size) {
+                        val nextArtist = artists[currentArtistIndex + 1]
+                        if (nextArtist.songUrl.isNotEmpty()) {
+                            val nextMediaItem = MediaItem.Builder()
+                                .setUri(Uri.parse(nextArtist.songUrl))
+                                .build()
+                            player.addMediaItem(nextMediaItem)
+                            android.util.Log.d("DiscoverScreen", "🔄 Siguiente canción precargada")
+                        }
                     }
                     
-                    player.play()
-                    isPlaying = true
-                    
-                    android.util.Log.d("DiscoverScreen", "Reproducción iniciada - Estado: ${player.playbackState}, isPlaying: ${player.isPlaying}")
+                    // 🚀 FASE 2: PRECARGA DE IMÁGENES (siguientes 3 canciones)
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        for (i in 1..3) {
+                            val nextIndex = currentArtistIndex + i
+                            if (nextIndex < artists.size) {
+                                val nextArtist = artists[nextIndex]
+                                if (nextArtist.imageUrl.isNotEmpty()) {
+                                    try {
+                                        val request = coil.request.ImageRequest.Builder(context)
+                                            .data(nextArtist.imageUrl)
+                                            .memoryCacheKey(nextArtist.imageUrl)
+                                            .diskCacheKey(nextArtist.imageUrl)
+                                            .build()
+                                        imageLoader.enqueue(request)
+                                        android.util.Log.d("DiscoverScreen", "🖼️ Imagen $i precargada: ${nextArtist.name}")
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("DiscoverScreen", "Error precargando imagen: ${e.message}")
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
                     android.util.Log.e("DiscoverScreen", "URL vacía para ${artist.name}")
                 }
@@ -793,8 +905,7 @@ fun DiscoverScreen(
                 isPlaying = false
             }
         } catch (e: Exception) {
-            android.util.Log.e("DiscoverScreen", "ERROR CRÍTICO al reproducir música: ${e.message}", e)
-            e.printStackTrace()
+            android.util.Log.e("DiscoverScreen", "ERROR al reproducir música: ${e.message}", e)
             isPlaying = false
         }
     }
@@ -818,8 +929,22 @@ fun DiscoverScreen(
                 }
             )
         } else {
-            // Contenido normal de DiscoverScreen
-            DiscoverScreenContent(
+            // SwipeRefresh para recargar canciones
+            val swipeRefreshState = rememberSwipeRefreshState(isRefreshing = isRefreshing)
+            
+            SwipeRefresh(
+                state = swipeRefreshState,
+                onRefresh = {
+                    scope.launch {
+                        isRefreshing = true
+                        refreshSongs()
+                        isRefreshing = false
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Contenido normal de DiscoverScreen
+                DiscoverScreenContent(
                 colors = colors,
                 isDarkMode = isDarkMode,
                 onMenuClick = onMenuClick,
@@ -945,6 +1070,7 @@ fun DiscoverScreen(
                     }
                 }
             )
+            }
         }
     }
 }
@@ -1831,584 +1957,6 @@ fun CommentItem(
     }
 }
 
-// PANTALLA 2: TU MÚSICA
-@Composable
-fun MyMusicScreen(
-    isDarkMode: Boolean = false,
-    colors: AppColors = getAppColors(false),
-    onMenuClick: () -> Unit = {}
-) {
-    val context = LocalContext.current
-    val player = rememberMusicPlayer(context, pauseOnBackground = false)
-    val firebaseManager = remember { FirebaseManager() }
-    val songLikesManager = remember { SongLikesManager() }
-    val authManager = remember { AuthManager(context) }
-    val scope = rememberCoroutineScope()
-    
-    val userId = authManager.getUserId() ?: ""
-    
-    var selectedTab by remember { mutableStateOf(0) } // 0 = Favoritos, 1 = Siguiendo
-    var likedSongs by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
-    var followingSongs by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
-    var filteredSongs by remember { mutableStateOf<List<ArtistCard>>(emptyList()) }
-    var currentPlayingIndex by remember { mutableStateOf<Int?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableStateOf(0L) }
-    var duration by remember { mutableStateOf(0L) }
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearching by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    // Cargar canciones que le gustaron al usuario desde Firebase
-    LaunchedEffect(userId) {
-        if (userId.isNotEmpty()) {
-            try {
-                isLoading = true
-                // Cargar canciones con like
-                likedSongs = songLikesManager.getUserLikedSongsDetails(userId, firebaseManager)
-                // Cargar canciones de artistas que sigue
-                followingSongs = firebaseManager.getSongsFromFollowing(userId)
-                
-                android.util.Log.d("MyMusicScreen", "✅ Canciones favoritas: ${likedSongs.size}")
-                android.util.Log.d("MyMusicScreen", "✅ Canciones de siguiendo: ${followingSongs.size}")
-                
-                filteredSongs = if (selectedTab == 0) likedSongs else followingSongs
-                isLoading = false
-            } catch (e: Exception) {
-                android.util.Log.e("MyMusicScreen", "Error cargando canciones: ${e.message}")
-                isLoading = false
-            }
-        } else {
-            isLoading = false
-        }
-    }
-    
-    // Actualizar canciones filtradas cuando cambia la pestaña
-    LaunchedEffect(selectedTab, likedSongs, followingSongs) {
-        filteredSongs = if (selectedTab == 0) likedSongs else followingSongs
-    }
-    
-    // Filtrar canciones según búsqueda
-    LaunchedEffect(searchQuery, selectedTab, likedSongs, followingSongs) {
-        val sourceSongs = if (selectedTab == 0) likedSongs else followingSongs
-        filteredSongs = if (searchQuery.isEmpty()) {
-            sourceSongs
-        } else {
-            sourceSongs.filter { song ->
-                song.name.contains(searchQuery, ignoreCase = true) ||
-                song.genre.contains(searchQuery, ignoreCase = true) ||
-                song.location.contains(searchQuery, ignoreCase = true)
-            }
-        }
-    }
-
-    // Actualizar posición y duración
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            currentPosition = player.currentPosition
-            duration = player.duration
-            kotlinx.coroutines.delay(100)
-        }
-    }
-
-    DisposableEffectWithLifecycle(player)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .padding(20.dp)
-    ) {
-        // Header con título y botón de búsqueda
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "TU MÚSICA",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Black,
-                color = PopArtColors.Yellow
-            )
-            
-            // Botón de búsqueda
-            IconButton(
-                onClick = { isSearching = !isSearching },
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(
-                        if (isSearching) PopArtColors.Yellow else PopArtColors.White,
-                        CircleShape
-                    )
-            ) {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = "Buscar",
-                    tint = if (isSearching) PopArtColors.Black else PopArtColors.Yellow,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-
-        // Pestañas: Favoritos / Siguiendo
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Pestaña Favoritos
-            Button(
-                onClick = { selectedTab = 0 },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (selectedTab == 0) PopArtColors.Yellow else PopArtColors.White.copy(alpha = 0.2f)
-                ),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "❤️",
-                        fontSize = 20.sp
-                    )
-                    Text(
-                        "Favoritos",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedTab == 0) PopArtColors.Black else PopArtColors.White
-                    )
-                }
-            }
-            
-            // Pestaña Siguiendo
-            Button(
-                onClick = { selectedTab = 1 },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (selectedTab == 1) PopArtColors.Yellow else PopArtColors.White.copy(alpha = 0.2f)
-                ),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "👥",
-                        fontSize = 20.sp
-                    )
-                    Text(
-                        "Siguiendo",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedTab == 1) PopArtColors.Black else PopArtColors.White
-                    )
-                }
-            }
-        }
-        
-        // Barra de búsqueda (se muestra cuando isSearching es true)
-        if (isSearching) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                placeholder = { Text("Buscar por artista, género o ubicación...", color = colors.text.copy(alpha = 0.6f)) },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = colors.primary)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpiar", tint = colors.text)
-                        }
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = colors.text,
-                    unfocusedTextColor = colors.text,
-                    focusedBorderColor = colors.primary,
-                    unfocusedBorderColor = colors.text,
-                    cursorColor = colors.primary
-                ),
-                shape = RoundedCornerShape(30.dp),
-                singleLine = true
-            )
-        } else {
-            Text(
-                if (selectedTab == 0) "Canciones que te gustaron 🎵" else "Canciones de artistas que sigues 👥",
-                fontSize = 18.sp,
-                color = colors.text,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-        }
-
-        // Sección de Estados de artistas que sigues
-        var stories by remember { mutableStateOf<List<ArtistStory>>(emptyList()) }
-        var showStoryViewer by remember { mutableStateOf(false) }
-        var selectedStoryIndex by remember { mutableStateOf(0) }
-        
-        // Cargar estados de artistas a los que les diste like
-        LaunchedEffect(userId) {
-            if (userId.isNotEmpty()) {
-                try {
-                    stories = firebaseManager.getStoriesFromLikedArtists(userId, songLikesManager)
-                } catch (e: Exception) {
-                    android.util.Log.e("MyMusicScreen", "Error cargando estados: ${e.message}")
-                }
-            }
-        }
-        
-        // Mostrar estados si hay
-        if (stories.isNotEmpty() && !isSearching) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp)
-            ) {
-                items(stories.size) { index ->
-                    val story = stories[index]
-                    StoryCircle(
-                        story = story,
-                        onClick = {
-                            selectedStoryIndex = index
-                            showStoryViewer = true
-                        }
-                    )
-                }
-            }
-        }
-
-        // Visor de estados
-        if (showStoryViewer && stories.isNotEmpty()) {
-            StoryViewerScreen(
-                stories = stories,
-                startIndex = selectedStoryIndex,
-                userId = userId,
-                onDismiss = { showStoryViewer = false },
-                onStoryViewed = { storyId ->
-                    scope.launch {
-                        try {
-                            firebaseManager.markStoryAsViewed(storyId, userId)
-                        } catch (e: Exception) {
-                            android.util.Log.e("MyMusicScreen", "Error marcando estado: ${e.message}")
-                        }
-                    }
-                }
-            )
-        }
-
-        // Contenido
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = colors.primary)
-            }
-        } else if ((selectedTab == 0 && likedSongs.isEmpty()) || (selectedTab == 1 && followingSongs.isEmpty())) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        if (selectedTab == 0) "💔" else "👥",
-                        fontSize = 80.sp
-                    )
-                    Text(
-                        if (selectedTab == 0) "No tienes favoritos aún" else "No sigues a nadie aún",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
-                        color = colors.primary
-                    )
-                    Text(
-                        if (selectedTab == 0) 
-                            "Dale ❤️ a las canciones que te gusten en Descubre"
-                        else
-                            "Sigue a artistas para ver sus canciones aquí",
-                        fontSize = 14.sp,
-                        color = colors.text,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 40.dp)
-                    )
-                }
-            }
-        } else if (filteredSongs.isEmpty()) {
-            // No hay resultados de búsqueda
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("🔍", fontSize = 80.sp)
-                    Text(
-                        "No se encontraron resultados",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
-                        color = PopArtColors.Yellow
-                    )
-                    Text(
-                        "Intenta con otra búsqueda",
-                        fontSize = 14.sp,
-                        color = PopArtColors.White,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(filteredSongs.size) { index ->
-                    val song = filteredSongs[index]
-                    val actualIndex = likedSongs.indexOf(song)
-                    val isCurrentlyPlaying = currentPlayingIndex == actualIndex && isPlaying
-                    
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (currentPlayingIndex == actualIndex) {
-                                    if (isPlaying) {
-                                        player.pause()
-                                        isPlaying = false
-                                    } else {
-                                        player.play()
-                                        isPlaying = true
-                                    }
-                                } else {
-                                    player.stop()
-                                    player.clearMediaItems()
-                                    val mediaItem = MediaItem
-                                        .Builder()
-                                        .setUri(Uri.parse(song.songUrl))
-                                        .build()
-                                    player.setMediaItem(mediaItem)
-                                    player.prepare()
-                                    player.play()
-                                    currentPlayingIndex = actualIndex
-                                    isPlaying = true
-                                }
-                            },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isCurrentlyPlaying) PopArtColors.Yellow else PopArtColors.White
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Imagen o emoji
-                            if (song.imageUrl.isNotEmpty()) {
-                                coil.compose.AsyncImage(
-                                    model = coil.request.ImageRequest.Builder(context)
-                                        .data(song.imageUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = song.name,
-                                    modifier = Modifier
-                                        .size(60.dp)
-                                        .clip(RoundedCornerShape(12.dp)),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(60.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .then(
-                                            if (isCurrentlyPlaying) {
-                                                Modifier.background(PopArtColors.Black)
-                                            } else {
-                                                Modifier.background(PopArtColors.MulticolorGradient)
-                                            }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("❤️", fontSize = 28.sp)
-                                }
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 16.dp)
-                            ) {
-                                Text(
-                                    song.name,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = PopArtColors.Black
-                                )
-                                Text(
-                                    "${song.genre} • ${song.location}",
-                                    fontSize = 14.sp,
-                                    color = PopArtColors.Black.copy(alpha = 0.7f),
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            if (isCurrentlyPlaying) {
-                                Text("⏸", fontSize = 32.sp, color = PopArtColors.Black)
-                            } else {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "Play",
-                                    tint = PopArtColors.Yellow,
-                                    modifier = Modifier.size(32.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Barra de reproducción
-            if (currentPlayingIndex != null && currentPlayingIndex!! < likedSongs.size) {
-                Spacer(Modifier.height(16.dp))
-                MusicPlayerBar(
-                    isPlaying = isPlaying,
-                    currentPosition = currentPosition,
-                    duration = duration,
-                    onPlayPause = {
-                        if (isPlaying) {
-                            player.pause()
-                            isPlaying = false
-                        } else {
-                            player.play()
-                            isPlaying = true
-                        }
-                    },
-                    onSeek = { position ->
-                        player.seekTo(position)
-                        currentPosition = position
-                    },
-                    songName = likedSongs[currentPlayingIndex!!].name
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun MusicPlayerBar(
-    isPlaying: Boolean,
-    currentPosition: Long,
-    duration: Long,
-    onPlayPause: () -> Unit,
-    onSeek: (Long) -> Unit,
-    songName: String
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = PopArtColors.Yellow)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            // Nombre de la canción
-            Text(
-                "Reproduciendo: $songName",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Black,
-                color = PopArtColors.Black,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            // Barra de progreso
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    formatTime(currentPosition),
-                    fontSize = 12.sp,
-                    color = PopArtColors.Black,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Slider(
-                    value = if (duration > 0) currentPosition.toFloat() else 0f,
-                    onValueChange = { onSeek(it.toLong()) },
-                    valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 8.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = PopArtColors.Black,
-                        activeTrackColor = PopArtColors.Black,
-                        inactiveTrackColor = PopArtColors.Black.copy(alpha = 0.3f)
-                    )
-                )
-
-                Text(
-                    formatTime(duration),
-                    fontSize = 12.sp,
-                    color = PopArtColors.Black,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // Botón de play/pause
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Button(
-                    onClick = onPlayPause,
-                    modifier = Modifier.size(60.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PopArtColors.Black),
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    if (isPlaying) {
-                        Text(
-                            "⏸",
-                            fontSize = 32.sp,
-                            color = PopArtColors.Yellow
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = "Play",
-                            tint = PopArtColors.Yellow,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-fun formatTime(millis: Long): String {
-    val seconds = (millis / 1000) % 60
-    val minutes = (millis / 1000) / 60
-    return String.format("%d:%02d", minutes, seconds)
-}
-
 // PANTALLA 3: LIVE (Conciertos y Concursos)
 @Composable
 fun LiveScreen() {
@@ -3175,76 +2723,6 @@ fun HypeDropdownMenu() {
 
 
 // ============ COMPONENTES DE ESTADOS/STORIES ============
-
-@Composable
-fun StoryCircle(
-    story: ArtistStory,
-    onClick: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(70.dp)
-            .clickable { onClick() }
-    ) {
-        Box(
-            modifier = Modifier.size(64.dp)
-        ) {
-            // Círculo con borde (amarillo si no visto, gris si ya visto)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .border(
-                        width = 3.dp,
-                        color = if (story.isViewed) PopArtColors.White.copy(alpha = 0.3f) else PopArtColors.Yellow,
-                        shape = CircleShape
-                    )
-                    .padding(3.dp)
-            ) {
-                // Imagen del artista
-                if (story.artistImageUrl.isNotEmpty()) {
-                    coil.compose.AsyncImage(
-                        model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                            .data(story.artistImageUrl)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = story.artistName,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(PopArtColors.Cyan, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            story.artistName.first().toString(),
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Black,
-                            color = PopArtColors.White
-                        )
-                    }
-                }
-            }
-        }
-        
-        Spacer(Modifier.height(4.dp))
-        
-        Text(
-            story.artistName,
-            fontSize = 12.sp,
-            color = PopArtColors.White,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
 
 @Composable
 fun StoryViewerScreen(
