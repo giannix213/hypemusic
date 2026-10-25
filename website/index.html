@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101014">
-  <meta name="description" content="Hype Music: productora musical y espacio para artistas con una voz propia. Conoce a El Chelo, Real Melody, Alex Bush y Miss Take.">
+  <meta name="description" content="Hype Music es una productora con mentalidad startup que impulsa, produce y promociona a artistas independientes. Conoce a El Chelo, Real Melody, Alex Kusks y Miss Take.">
   <title>Hype Music — hacemos que suene</title>
-  <link rel="icon" href="https://raw.githubusercontent.com/giannix213/hypemusic/master/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23d5ff45%22/%3E%3Cpath d=%22M27 72V28L50 50 73 28V72%22 fill=%22none%22 stroke=%22%23101014%22 stroke-width=%2210%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
     .wrap{width:min(1200px,calc(100% - 48px));margin:auto}
     .topbar{height:84px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
     .brand{display:flex;align-items:center;gap:12px;font-family:var(--display);font-size:18px;font-weight:700;letter-spacing:.09em}
-    .brand img{width:39px;height:39px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,.24)}
+    .brand-mark{width:39px;height:39px;flex:none;filter:drop-shadow(0 0 12px rgba(213,255,69,.18))}
     .brand small{display:block;color:var(--muted);font:600 9px var(--body);letter-spacing:.27em;margin-top:2px}
     nav{display:flex;align-items:center;gap:34px;color:#d0cdc8;font-size:13px}
     nav a{transition:color .2s}nav a:hover{color:var(--lime)}
@@ -84,7 +84,7 @@
     .closing h2{font:600 clamp(44px,8vw,90px)/.95 var(--display);letter-spacing:-.08em;margin:22px auto;max-width:850px}
     .closing p{max-width:490px;margin:0 auto 28px;color:var(--muted);font-size:15px;line-height:1.7}
     footer{border-top:1px solid var(--line);padding:24px 0 30px;display:flex;justify-content:space-between;align-items:center;color:#898580;font-size:11px}
-    footer .brand{color:var(--paper);font-size:14px}footer .brand img{width:30px;height:30px;border-radius:9px}
+    footer .brand{color:var(--paper);font-size:14px}footer .brand-mark{width:30px;height:30px}
     .footer-note{letter-spacing:.1em;text-transform:uppercase}
     @media(max-width:850px){.hero{gap:30px;min-height:550px}.hero-art{height:405px}.artists{grid-template-columns:repeat(2,1fr);gap:25px 16px}.artist-art{height:390px}.about-grid{gap:40px}}
     @media(max-width:620px){.wrap{width:min(100% - 32px,500px)}.topbar{height:70px}.brand{font-size:15px}.brand img{width:34px;height:34px}nav{gap:13px;font-size:11px}nav a:nth-child(2){display:none}.nav-cta{padding:9px 11px}.hero{grid-template-columns:1fr;gap:38px;padding:66px 0 58px;min-height:0}.hero-copy>p{font-size:15px}h1{font-size:clamp(58px,15vw,84px)}.hero-art{height:min(102vw,420px);width:calc(100% - 12px);justify-self:center;margin-right:12px}.disc{width:84px;height:84px;right:-28px}.section{padding:78px 0}.section-head{display:block}.section-head p{margin-top:18px}.artist-art{height:clamp(230px,70vw,340px)}.artist-name{font-size:clamp(20px,6vw,27px)}.artist-graphic{font-size:75px}.about-grid{grid-template-columns:1fr;gap:22px}.about-copy>p{font-size:17px}.services{grid-template-columns:1fr;gap:0}.service{padding:17px 0;border-bottom:1px solid rgba(16,16,20,.14)}.closing{padding:76px 0}.closing h2{font-size:clamp(49px,13vw,70px)}footer{gap:18px;align-items:flex-start;flex-wrap:wrap}.footer-note{width:100%;order:2}}
@@ -94,7 +94,10 @@
 <body>
   <header class="wrap topbar">
     <a class="brand" href="#" aria-label="Hype Music, inicio">
-      <img src="https://raw.githubusercontent.com/giannix213/hypemusic/master/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" alt="">
+      <svg class="brand-mark" viewBox="0 0 48 48" role="img" aria-label="Hype Music">
+        <rect width="48" height="48" rx="14" fill="#d5ff45"/>
+        <path d="M13 33V15l11 11 11-11v18" fill="none" stroke="#101014" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
       <span>HYPE<small>MUSIC</small></span>
     </a>
     <nav aria-label="Navegación principal">
@@ -107,9 +110,9 @@
   <main>
     <section class="wrap hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <div class="eyebrow">Productora y promotora musical · Perú</div>
+        <div class="eyebrow">Productora independiente · Perú</div>
         <h1 id="hero-title">PROMOVEMOS<br>VOCES <span>PROPIAS.</span></h1>
-        <p>Hype Music es la productora que impulsa y promociona a sus artistas: cuidamos su sonido, construimos su identidad y llevamos su música a nuevas audiencias.</p>
+        <p>HYPE MUSIC es una productora con mentalidad startup: cercana, ágil y hecha para acompañar a artistas independientes. Unimos producción, identidad y promoción para que cada proyecto crezca sin perder su voz.</p>
         <div class="actions">
           <a class="button" href="#artistas">Conoce el roster <span class="arrow" aria-hidden="true">↘</span></a>
           <a class="text-link" href="#productora">Qué hacemos</a>
@@ -135,7 +138,7 @@
     <section class="wrap section" id="artistas" aria-labelledby="artists-title">
       <div class="section-head">
         <div><div class="eyebrow">Talento Hype</div><h2 id="artists-title">NUESTRAS<br>VOCES.</h2></div>
-        <p>El roster de artistas que Hype Music produce, impulsa y promociona.</p>
+        <p>Conoce a los artistas independientes que Hype Music produce y promociona. Cada proyecto conserva su voz y construye su propia comunidad.</p>
       </div>
       <div class="artists">
         <article class="artist">
@@ -176,11 +179,11 @@
           <h2 id="about-title">SONIDO<br>CON INTENCIÓN.</h2>
         </div>
         <div class="about-copy">
-          <p>Hype Music produce y promociona artistas con una voz propia. Acompañamos cada proyecto desde la primera nota, cuidando su sonido, su identidad y la forma en que llega a su público.</p>
+          <p>Trabajamos en equipo con cada artista, probamos ideas y ajustamos el camino sobre la marcha. Así construimos una productora flexible, cercana y enfocada en el crecimiento de proyectos independientes.</p>
           <div class="services">
-            <div class="service"><strong>Producción</strong><span>Un sonido que le pertenece a cada artista.</span></div>
-            <div class="service"><strong>Desarrollo</strong><span>Identidad, dirección y crecimiento artístico.</span></div>
-            <div class="service"><strong>Lanzamientos</strong><span>Música lista para salir al mundo.</span></div>
+            <div class="service"><strong>Producción sonora</strong><span>Un sonido propio para cada proyecto.</span></div>
+            <div class="service"><strong>Estrategia artística</strong><span>Identidad, dirección y próximos pasos.</span></div>
+            <div class="service"><strong>Promoción</strong><span>Más alcance para llegar a nuevas audiencias.</span></div>
           </div>
         </div>
       </div>
@@ -190,16 +193,19 @@
       <div class="eyebrow" style="justify-content:center">Hype Music</div>
       <h2>HAY MÁS<br>MÚSICA POR DESCUBRIR.</h2>
       <p>Explora las voces de Hype Music y encuentra tu próximo sonido favorito.</p>
-      <a class="button" href="#artistas">Descubre el roster <span class="arrow" aria-hidden="true">↗</span></a>
+      <a class="button" href="#productora">Conoce nuestro modelo <span class="arrow" aria-hidden="true">↗</span></a>
     </section>
   </main>
 
   <footer class="wrap">
     <a class="brand" href="#" aria-label="Hype Music, inicio">
-      <img src="https://raw.githubusercontent.com/giannix213/hypemusic/master/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" alt="">
+      <svg class="brand-mark" viewBox="0 0 48 48" role="img" aria-label="Hype Music">
+        <rect width="48" height="48" rx="14" fill="#d5ff45"/>
+        <path d="M13 33V15l11 11 11-11v18" fill="none" stroke="#101014" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
       <span>HYPE<small>MUSIC</small></span>
     </a>
-    <span class="footer-note">Música con identidad · Perú</span>
+    <span class="footer-note">Productora para artistas independientes · Perú</span>
     <span>© Hype Music 2026</span>
   </footer>
 </body>
