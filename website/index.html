@@ -39,7 +39,7 @@
     .arrow{font-size:19px;line-height:0}
     .text-link{font-size:13px;color:#d3cfca}
     .hero-art{height:480px;max-width:430px;width:100%;justify-self:end}
-    .hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:9px;filter:saturate(.92)}
+    .hero-visual{position:absolute;inset:0;overflow:hidden;border-radius:9px;background:radial-gradient(circle at 70% 25%,rgba(213,255,69,.25),transparent 19%),radial-gradient(ellipse at 50% 50%,rgba(155,85,255,.62),transparent 43%),linear-gradient(145deg,#251c32,#121116 58%,#4a123a)}.hero-visual:before{content:"";position:absolute;width:330px;height:330px;right:-24px;top:35px;border:1px solid rgba(255,255,255,.18);border-radius:50%;background:repeating-radial-gradient(circle,#15141a 0 2px,#24212a 3px 4px);box-shadow:0 0 65px rgba(155,85,255,.35)}.hero-mark{position:absolute;z-index:1;left:25px;top:48px;color:rgba(243,240,234,.92);font:700 clamp(54px,7vw,86px)/.78 var(--display);letter-spacing:-.1em}.hero-bars{position:absolute;z-index:1;left:26px;right:26px;bottom:33px;height:54px;display:flex;align-items:center;justify-content:center;gap:5px}.hero-bars i{width:3px;height:var(--h,32%);border-radius:9px;background:var(--lime);box-shadow:0 0 15px rgba(213,255,69,.35)}.hero-bars i:nth-child(3n){--h:80%}.hero-bars i:nth-child(3n + 1){--h:48%}.hero-bars i:nth-child(4n){--h:100%}.hero-bars i:nth-child(5n){--h:24%}
     .hero-art:after{content:"";position:absolute;inset:0;border-radius:9px;background:linear-gradient(180deg,rgba(16,16,20,.02) 35%,rgba(16,16,20,.82) 100%)}
     .photo-frame{position:absolute;inset:12px -12px -12px 12px;border:1px solid rgba(213,255,69,.58);border-radius:10px;z-index:-1}
     .photo-top{position:absolute;z-index:2;left:20px;top:20px;background:rgba(16,16,20,.78);backdrop-filter:blur(8px);padding:10px 13px;border-radius:5px;font-size:10px;letter-spacing:.16em;font-weight:700;color:var(--lime)}
@@ -57,7 +57,7 @@
     .section-head p{max-width:330px;color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 4px}
     .artists{display:grid;grid-template-columns:repeat(4,1fr);gap:17px}
     .artist{min-width:0}
-    .artist-art{height:330px;position:relative;overflow:hidden;border-radius:7px;background:#26222d;isolation:isolate}
+    .artist-art{height:330px;position:relative;overflow:hidden;border-radius:7px;background:#26222d;isolation:isolate}.artist-art.alex{background:linear-gradient(145deg,#ac1833,#4c0b1d)}.artist-art img.alex-banner{height:auto;top:48%;transform:translateY(-50%);object-fit:contain}.artist-art img.real-melody{object-position:left center}.artist:hover .artist-art img.alex-banner{transform:translateY(-50%) scale(1.045)}
     .artist-art:after{content:"";position:absolute;inset:0;z-index:0;background:linear-gradient(180deg,transparent 48%,rgba(10,10,13,.68))}
     .artist-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .45s}
     .artist:hover .artist-art img{transform:scale(1.045)}
@@ -107,9 +107,9 @@
   <main>
     <section class="wrap hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <div class="eyebrow">Productora musical · Perú</div>
-        <h1 id="hero-title">HACEMOS<br>QUE <span>SUENE.</span></h1>
-        <p>Un espacio para artistas con algo propio que decir. Impulsamos música, identidad y nuevas formas de conectar con quienes la escuchan.</p>
+        <div class="eyebrow">Productora y promotora musical · Perú</div>
+        <h1 id="hero-title">PROMOVEMOS<br>VOCES <span>PROPIAS.</span></h1>
+        <p>Hype Music es la productora que impulsa y promociona a sus artistas: cuidamos su sonido, construimos su identidad y llevamos su música a nuevas audiencias.</p>
         <div class="actions">
           <a class="button" href="#artistas">Conoce el roster <span class="arrow" aria-hidden="true">↘</span></a>
           <a class="text-link" href="#productora">Qué hacemos</a>
@@ -117,7 +117,7 @@
       </div>
       <div class="hero-art">
         <div class="photo-frame" aria-hidden="true"></div>
-        <img class="hero-photo" src="./assets/artista-hype.png" alt="Artista de Hype Music en una sesión de retrato">
+        <div class="hero-visual" aria-hidden="true"><span class="hero-mark">HYPE<br>MUSIC</span><div class="hero-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
         <div class="photo-top">HYPE MUSIC / VOL. 01</div>
         <div class="disc" aria-hidden="true"></div>
         <div class="hero-caption">
@@ -135,36 +135,36 @@
     <section class="wrap section" id="artistas" aria-labelledby="artists-title">
       <div class="section-head">
         <div><div class="eyebrow">Talento Hype</div><h2 id="artists-title">NUESTRAS<br>VOCES.</h2></div>
-        <p>Cuatro caminos, cuatro maneras de sentir la música. Conoce a los artistas que hacen sonar Hype.</p>
+        <p>El roster de artistas que Hype Music produce, impulsa y promociona.</p>
       </div>
       <div class="artists">
         <article class="artist">
           <div class="artist-art">
-            <div class="artist-graphic chelo" aria-hidden="true">EC</div>
+            <img src="./assets/el-chelo.png" alt="Retrato promocional de El Chelo">
             <span class="artist-no">01 / 04</span><div class="artist-name">EL CHELO</div>
           </div>
-          <div class="artist-meta"><span>Artista Hype Music</span><b>↗</b></div>
+          <div class="artist-meta"><span>Promovido por Hype Music</span><b>↗</b></div>
         </article>
         <article class="artist">
           <div class="artist-art">
-            <div class="artist-graphic melody" aria-hidden="true">RM</div>
-            <span class="artist-no">02 / 04</span><div class="artist-name">REAL<br>MELODY</div>
+            <img class="real-melody" src="./assets/real-melody.png" alt="Logo promocional de Real Melody">
+            <span class="artist-no">02 / 04</span><div class="artist-name">REAL MELODY</div>
           </div>
-          <div class="artist-meta"><span>Artista Hype Music</span><b>↗</b></div>
+          <div class="artist-meta"><span>Promovido por Hype Music</span><b>↗</b></div>
         </article>
         <article class="artist">
-          <div class="artist-art">
-            <div class="artist-graphic bush" aria-hidden="true">AB</div>
-            <span class="artist-no">03 / 04</span><div class="artist-name">ALEX BUSH</div>
+          <div class="artist-art alex">
+            <img class="alex-banner" src="./assets/alex-kusks.png" alt="Banner promocional de Alex Kusks">
+            <span class="artist-no">03 / 04</span><div class="artist-name">ALEX KUSKS</div>
           </div>
-          <div class="artist-meta"><span>Artista Hype Music</span><b>↗</b></div>
+          <div class="artist-meta"><span>Promovido por Hype Music</span><b>↗</b></div>
         </article>
         <article class="artist">
           <div class="artist-art">
             <img src="./assets/miss-take.png" alt="Retrato promocional de Miss Take">
             <span class="artist-no">04 / 04</span><div class="artist-name">MISS TAKE</div>
           </div>
-          <div class="artist-meta"><span>Pop · indie · alternativo</span><b>↗</b></div>
+          <div class="artist-meta"><span>Promovido por Hype Music · Pop · indie · alternativo</span><b>↗</b></div>
         </article>
       </div>
     </section>
@@ -176,7 +176,7 @@
           <h2 id="about-title">SONIDO<br>CON INTENCIÓN.</h2>
         </div>
         <div class="about-copy">
-          <p>En Hype Music acompañamos ideas desde su primera nota hasta el momento en que encuentran a su público. Cuidamos el sonido y la identidad de cada proyecto.</p>
+          <p>Hype Music produce y promociona artistas con una voz propia. Acompañamos cada proyecto desde la primera nota, cuidando su sonido, su identidad y la forma en que llega a su público.</p>
           <div class="services">
             <div class="service"><strong>Producción</strong><span>Un sonido que le pertenece a cada artista.</span></div>
             <div class="service"><strong>Desarrollo</strong><span>Identidad, dirección y crecimiento artístico.</span></div>
